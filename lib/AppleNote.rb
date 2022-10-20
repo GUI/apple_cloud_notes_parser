@@ -1,5 +1,8 @@
+require 'cgi'
 require 'keyed_archive'
+require 'reverse_markdown'
 require 'sqlite3'
+require 'yaml'
 require 'zlib'
 require_relative 'notestore_pb.rb'
 require_relative 'AppleCloudKitRecord'
@@ -22,6 +25,47 @@ require_relative 'AppleNotesEmbeddedPublicVideo.rb'
 require_relative 'AppleNotesEmbeddedTable.rb'
 require_relative 'AppleNoteStore.rb'
 require_relative 'AppleUniformTypeIdentifier.rb'
+
+module CustomMarkdownConverters
+  class Li < ReverseMarkdown::Converters::Li
+    def prefix_for(node)
+      case node.attr("class")
+      when "checked"
+        "- [x] "
+      when "unchecked"
+        "- [ ] "
+      else
+        case node.parent.attr("class")
+        when "dashed"
+          "- "
+        when "dotted"
+          "* "
+        else
+          super
+        end
+      end
+    end
+  end
+
+  class Code < ReverseMarkdown::Converters::Pre
+    def convert(node, state = {})
+      if node.text.include?("\n")
+        super
+      else
+        "`#{node.text}`"
+      end
+    end
+  end
+end
+
+class ReverseMarkdown::Cleaner
+  def clean_tag_borders(string)
+    string
+  end
+end
+
+ReverseMarkdown::Converters.register :li, CustomMarkdownConverters::Li.new
+ReverseMarkdown::Converters.register :code, CustomMarkdownConverters::Code.new
 
 ##
 #
@@ -402,11 +446,54 @@ class AppleNote < AppleCloudKitRecord
     @html = html
   end
 
+  def generate_markdown
+    return @markdown if @markdown
+
+    metadata = {
+      "apple-notes-id" => @note_id,
+      "apple-notes-account" => @account.name,
+      "apple-notes-folder-name" => @folder.name,
+      "apple-notes-folder-primary-key" => @folder.primary_key,
+      "apple-notes-title" => @title,
+      "apple-notes-created" => @creation_time,
+      "apple-notes-modified" => @modify_time,
+    }
+
+    if @is_pinned
+      metadata["apple-notes-pinned"] = @is_pinned
+    end
+    if cloud_kit_record_known?(@cloudkit_creator_record_id, @notestore.cloud_kit_participants)
+      metadata["apple-notes-cloudkit-creator"] = @notestore.cloud_kit_participants[@cloudkit_creator_record_id].email
+    end
+    if cloud_kit_record_known?(@cloudkit_modifier_record_id, @notestore.cloud_kit_participants)
+      metadata["apple-notes-cloudkit-modified-user"] = @notestore.cloud_kit_participants[@cloudkit_modifier_record_id].email
+    end
+    if @cloudkit_last_modified_device
+      metadata["apple-notes-cloudkit-modified-device"] = @cloudkit_last_modified_device
+    end
+    if self.has_tags
+      metadata["apple-notes-tags"] = self.get_all_tags.map { |tag| tag.to_s }
+    end
+
+    markdown = YAML.dump(metadata)
+    markdown += "---\n\n"
+
+    # Handle the text to insert, only if we have plaintext to run
+    if @plaintext
+      markdown += "#{plaintext}" if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
+      markdown += ReverseMarkdown.convert(generate_html_text, github_flavored: true) if @notestore.version > AppleNoteStore::IOS_VERSION_9
+    else
+      markdown += "{Contents not decrypted}" if @encrypted_data
+    end
+
+    @markdown = markdown
+  end
+
   ##
   # This helper function takes a MergableDataProto or NoteStoreProto as +document_proto+ and 
   # a Hash of AppleNotesEmbeddedObjects as +embedded_objects+. It returns a String containing 
   # appropriate HTML for the document.
-  def self.htmlify_document(document_proto, embedded_objects)
+  def self.htmlify_document(document_proto, embedded_objects, note: nil)
     html = ""
 
     # Tables cells will be a MergableDataProto
@@ -420,15 +507,28 @@ class AppleNote < AppleCloudKitRecord
     embedded_object_index = 0
     current_index = 0
     current_style = -1
+    current_indent_amount = nil
+    open_div = false
 
     # Create a copy of the text, which is frozen
     note_text = root_node.note.note_text.dup
+
+    if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+      puts "NOTE_TEXT: #{note_text.inspect}"
+    end
 
     # Capture if we're in a checkbox, because they're special
     current_checkbox = nil
 
     # Iterate over the attribute runs to display stuffs
     root_node.note.attribute_run.each_with_index do |note_part, attribute_run_index|
+      if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+        puts "NOTE_ID: #{note.note_id.inspect}"
+        puts "NOTE_PART: #{note_part.inspect}"
+        puts "ATTRIBUTE_RUN_INDEX: #{attribute_run_index.inspect}"
+        puts "CURRENT_STYLE: #{current_style.inspect}"
+        puts "STYLE_TYPE: #{note_part.paragraph_style.style_type.inspect}"
+      end
 
       # Clean up open style tags
       stale_style = (!note_part.paragraph_style or (note_part.paragraph_style.style_type != current_style))
@@ -443,11 +543,22 @@ class AppleNote < AppleCloudKitRecord
         when STYLE_TYPE_MONOSPACED
           html += "</code>"
         when STYLE_TYPE_NUMBERED_LIST
-          html += "</li></ol>"
+          if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+            puts "STALE: #{current_indent_amount.inspect}"
+          end
+
+          html += "</li></ol>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
         when STYLE_TYPE_DOTTED_LIST
-          html += "</li></ul>"
+          html += "</li></ul>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
         when STYLE_TYPE_DASHED_LIST
-          html += "</li></ul>"
+          html += "</li></ul>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
+        when STYLE_TYPE_DEFAULT
+          if open_div
+            html += "</div>\n"
+            open_div = false
+          end
+
+          html += "</p>"
         end
       end
 
@@ -464,7 +575,20 @@ class AppleNote < AppleCloudKitRecord
         current_style = -1
 
       else # We must have text to parse
+        # Add in the slice of text represented by this run
+        slice_to_add = note_text.slice(current_index, note_part.length)
 
+        # Apple seems to be making Emojis and some other characters two characters
+        # this breaks stuff. This is a really hacky solution.
+        double_characters = 0
+        slice_to_add.each_codepoint do |codepoint|
+          double_characters += 1 if codepoint > 65535
+        end
+
+        if double_characters > 0
+          slice_to_add = note_text.slice(current_index, note_part.length - double_characters)
+        end
+ 
         # Deal with styling
         if note_part.paragraph_style
 
@@ -482,14 +606,16 @@ class AppleNote < AppleCloudKitRecord
           end
 
           # Add in indents, this doesn't work so well
-          indents = 0
-          while indents < note_part.paragraph_style.indent_amount and !note_part_is_checkbox and !note_part_is_list do
-            html += "\t"
-            indents += 1
-          end
+          # if slice_to_add.include?("\n")
+          #   indents = 0
+          #   while indents < note_part.paragraph_style.indent_amount and !note_part_is_checkbox and !note_part_is_list do
+          #     html += "\t"
+          #     indents += 1
+          #   end
+          # end
 
           # Add new style
-          needs_new_style = (attribute_run_index == 0 or (note_part.paragraph_style.style_type != current_style) or current_style == STYLE_TYPE_CHECKBOX)
+          needs_new_style = (attribute_run_index == 0 or (note_part.paragraph_style.style_type != current_style) or current_style == STYLE_TYPE_CHECKBOX or ([STYLE_TYPE_NUMBERED_LIST, STYLE_TYPE_DOTTED_LIST, STYLE_TYPE_DASHED_LIST, STYLE_TYPE_CHECKBOX].include?(current_style) && note_part.paragraph_style.indent_amount != current_indent_amount))
           if needs_new_style
             case note_part.paragraph_style.style_type
             when STYLE_TYPE_TITLE
@@ -501,34 +627,68 @@ class AppleNote < AppleCloudKitRecord
             when STYLE_TYPE_MONOSPACED
               html += "<code>"
             when STYLE_TYPE_NUMBERED_LIST
-              html += "<ol><li>"
+              if current_indent_amount && note_part.paragraph_style.indent_amount < current_indent_amount
+                html += "</li></ol></li>"
+              elsif current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount
+                html.sub!(/<\/li><li>\z/, "<ol>")
+              else
+                html += "<ol>"
+              end
+
+              html += "<li>"
             when STYLE_TYPE_DOTTED_LIST
-              html += "<ul><li>"
+              if current_indent_amount && note_part.paragraph_style.indent_amount < current_indent_amount
+                html += "</li></ul></li>"
+              elsif current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount
+                html.sub!(/<\/li><li>\z/, "<ul class='dotted'>")
+              else
+                html += "<ul class='dotted'>"
+              end
+
+              html += "<li>"
             when STYLE_TYPE_DASHED_LIST
-              html += "<ul><li>"
+              if current_indent_amount && note_part.paragraph_style.indent_amount < current_indent_amount
+                html += "</li></ul></li>"
+              elsif current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount
+                html.sub!(/<\/li><li>\z/, "<ul class='dashed'>")
+              else
+                html += "<ul class='dashed'>"
+              end
+
+              html += "<li>"
             when STYLE_TYPE_CHECKBOX
+              if !current_checkbox || (current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount)
+                html += "<ul class='checklist'>"
+              elsif current_indent_amount && note_part.paragraph_style.indent_amount < current_indent_amount
+                html += "</li></ul></li>"
+              end
 
               # Set the style to apply to the list item
               style = "unchecked"
               style = "checked" if note_part.paragraph_style.checklist.done == 1
 
               # Open a list if we don't have a current one going
-              if !current_checkbox
-                html += "<ul class='checklist'><li class='#{style}'>"
+              if !current_checkbox || (current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount)
+                html += "<li class='#{style}'>"
 
               # Or just open a new list element
               elsif current_checkbox != note_part.paragraph_style.checklist.uuid
                 html += "</li><li class='#{style}'>"
               end
+
               # Update our knowledge of the current checkbox
               current_checkbox = note_part.paragraph_style.checklist.uuid
+            else STYLE_TYPE_DEFAULT
+              html += "<p>"
             end
           end
           current_style = note_part.paragraph_style.style_type
+          current_indent_amount = note_part.paragraph_style.indent_amount
 
         else
           # Clear the current style if we did NOT have any paragraph style information
           current_style = -1
+          current_indent_amount = nil
         end
 
         # Add in font stuff
@@ -553,22 +713,11 @@ class AppleNote < AppleCloudKitRecord
           html += "<del>"
         end
 
-        # Add in the slice of text represented by this run
-        slice_to_add = note_text.slice(current_index, note_part.length)
-
-        # Apple seems to be making Emojis and some other characters two characters
-        # this breaks stuff. This is a really hacky solution.
-        double_characters = 0
-        slice_to_add.each_codepoint do |codepoint|
-          double_characters += 1 if codepoint > 65535
-        end
-
-        if double_characters > 0
-          slice_to_add = note_text.slice(current_index, note_part.length - double_characters)
-        end
-        
         # Deal with newlines
         if (current_style == STYLE_TYPE_NUMBERED_LIST or current_style == STYLE_TYPE_DOTTED_LIST or current_style == STYLE_TYPE_DASHED_LIST)
+          if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+            puts "SLICE_TO_ADD BEFORE: #{slice_to_add.inspect}"
+          end
           need_to_close_li = slice_to_add.end_with?("\n")
           slice_to_add = slice_to_add.split("\n").join("</li><li>")
           slice_to_add += "</li><li>" if need_to_close_li
@@ -578,10 +727,29 @@ class AppleNote < AppleCloudKitRecord
 
         # Add in links that are part of the text itself
         if note_part.link and note_part.link.length > 0
-          slice_to_add = "<a href='#{note_part.link}' target='_blank'>#{slice_to_add}</a>"
+          slice_to_add = "<a href='#{CGI.escape(note_part.link)}' target='_blank'>#{slice_to_add}</a>"
         end
 
+        if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+          puts "SLICE_TO_ADD: #{slice_to_add.inspect}"
+        end
+
+        if current_style == STYLE_TYPE_DEFAULT
+          slice_to_add.gsub!("\n\n", "</p><p>")
+          slice_to_add.gsub!("\n", "<br>")
+        end
+
+        # if current_style == STYLE_TYPE_DEFAULT && html.end_with?("\n") && !open_div
+        #   html += "<div>"
+        #   open_div = true
+        # end
+
         html += slice_to_add
+
+        # if current_style == STYLE_TYPE_DEFAULT && html.end_with?("\n") && open_div
+        #   html += "</div>\n"
+        #   open_div = false
+        # end
 
         # Increment our counter to be sure we don't loop infinitely
         current_index += (note_part.length - double_characters)
@@ -623,13 +791,24 @@ class AppleNote < AppleCloudKitRecord
     when STYLE_TYPE_MONOSPACED
       html += "</code>"
     when STYLE_TYPE_NUMBERED_LIST
-      html += "</li></ol>"
+      if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+        puts "CLOSING: #{current_indent_amount.inspect}"
+      end
+
+      html += "</li></ol>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
     when STYLE_TYPE_DOTTED_LIST
-      html += "</li></ul>"
+      html += "</li></ul>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
     when STYLE_TYPE_DASHED_LIST
-      html += "</li></ul>"
+      html += "</li></ul>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
     when STYLE_TYPE_CHECKBOX
-      html += "</li></ul>"
+      html += "</li></ul>" * ((current_indent_amount && current_indent_amount > 0) ? current_indent_amount + 1 : 1)
+    else STYLE_TYPE_DEFAULT
+      if open_div
+        html += "</div>\n"
+        open_div = false
+      end
+
+      html += "</p>"
     end
 
     # Remove any doubled tags
@@ -668,7 +847,7 @@ class AppleNote < AppleCloudKitRecord
     return html if !tmp_note_store_proto
   
     # Now using a function designed specifically for turning attribute runs into HTML from anyy source  
-    html = AppleNote.htmlify_document(tmp_note_store_proto, @embedded_objects)
+    html = AppleNote.htmlify_document(tmp_note_store_proto, @embedded_objects, note: self)
     return html
   end
 

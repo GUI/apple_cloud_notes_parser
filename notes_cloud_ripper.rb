@@ -197,6 +197,11 @@ if apple_backup and apple_backup.valid? and apple_backup.note_stores.first.valid
   logger.debug("Creating JSON output folder: #{json_directory}")
   json_directory.mkpath
 
+  # Make a separate folder to hold the Markdown files
+  markdown_directory = output_directory + "markdown"
+  logger.debug("Creating Markdown output folder: #{markdown_directory}")
+  markdown_directory.mkpath
+
   backup_number = 1
   apple_backup.note_stores.each do |note_store|
 
@@ -212,6 +217,14 @@ if apple_backup and apple_backup.valid? and apple_backup.note_stores.first.valid
     logger.debug("Writing JSON for Note Store")
     File.open(json_directory + "all_notes_#{backup_number}.json", "wb") do |file|
       file.write(JSON.generate(note_store.prepare_json))
+    end
+
+    # Write out the Markdown files
+    logger.debug("Writing Markdown for Note Store")
+    note_store.notes.each do |key, note|
+      File.open(markdown_directory + "#{backup_number}_#{note.note_id}.md", "wb") do |file|
+        file.write(note.generate_markdown)
+      end
     end
 
     # Create a CSV of the AppleNotesAccount objects
