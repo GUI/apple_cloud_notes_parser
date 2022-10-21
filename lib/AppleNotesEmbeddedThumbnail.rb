@@ -1,3 +1,5 @@
+require 'addressable'
+
 ##
 # This class represents the thumbnail generated for embedded pictures in an  
 # in an AppleNote. 
@@ -78,7 +80,8 @@ class AppleNotesEmbeddedThumbnail < AppleNotesEmbeddedObject
   ##
   # This method generates the HTML necessary to display the image inline.
   def generate_html
-    return "<a href='../#{@parent.reference_location}'><img src='../#{@reference_location}' /></a>" if (@parent.reference_location and @reference_location)
+    # return "<a href='#{Addressable::URI.encode("../#{@parent.reference_location}")}'><img src='#{Addressable::URI.encode("../#{@reference_location}")}' /></a>" if (@parent.reference_location and @reference_location)
+    return %(<img src="#{Addressable::URI.encode("../#{@parent.reference_location}")}" />) if (@parent.reference_location)
     return "{Image missing due to not having file reference point}"
   end
 

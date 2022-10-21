@@ -1,4 +1,5 @@
-require 'cgi'
+require 'addressable'
+require 'erb'
 require 'keyed_archive'
 require 'reverse_markdown'
 require 'sqlite3'
@@ -25,6 +26,16 @@ require_relative 'AppleNotesEmbeddedPublicVideo.rb'
 require_relative 'AppleNotesEmbeddedTable.rb'
 require_relative 'AppleNoteStore.rb'
 require_relative 'AppleUniformTypeIdentifier.rb'
+
+class ReverseMarkdown::Converters::Base
+  def escape_keychars(string)
+    string
+      .gsub(/(?<!\\)[*_`\[\]\\]/, '*' => '\*', '_' => '\_', '`' => '\`', '[' => '\[', ']' => '\]', '\\' => '\\\\')
+      .gsub(/^(\s*)(-|\+|\#{1,6}|~~~) /, '\1\\\\\2 ')
+      .gsub(/^(\s*)(>|=|~~~)/, '\1\\\\\2')
+      .gsub(/^(\s*\d+)\. /, '\1\. ')
+  end
+end
 
 module CustomMarkdownConverters
   class Li < ReverseMarkdown::Converters::Li
@@ -56,16 +67,68 @@ module CustomMarkdownConverters
       end
     end
   end
+
+  class Img < ReverseMarkdown::Converters::Img
+    def convert(node, state = {})
+      super.strip
+    end
+  end
+
+  class ObjectTag < ReverseMarkdown::Converters::Base
+    def convert(node, state = {})
+      alt = node.text
+      src = node["data"]
+      title = extract_title(node)
+      "![#{alt}](#{src}#{title})"
+    end
+  end
+
+  class U < ReverseMarkdown::Converters::Base
+    def convert(node, state = {})
+      treat_children(node, state)
+    end
+  end
+
+  class P < ReverseMarkdown::Converters::Base
+    def convert(node, state = {})
+      "\n\n" << treat_children(node, state) << "\n\n"
+    end
+  end
+
+  class Text < ReverseMarkdown::Converters::Text
+    private
+
+    def treat_text(node)
+      if node.ancestors("pre").first
+        node.text
+      else
+        super
+      end
+    end
+
+    def remove_inner_newlines(text)
+      text.tr("\r\n", ' ')
+    end
+  end
 end
 
 class ReverseMarkdown::Cleaner
   def clean_tag_borders(string)
     string
   end
+
+  def remove_inner_whitespaces(string)
+    string
+  end
 end
 
+ReverseMarkdown::Converters.register :text, CustomMarkdownConverters::Text.new
 ReverseMarkdown::Converters.register :li, CustomMarkdownConverters::Li.new
-ReverseMarkdown::Converters.register :code, CustomMarkdownConverters::Code.new
+# ReverseMarkdown::Converters.register :code, CustomMarkdownConverters::Code.new
+ReverseMarkdown::Converters.register :img, CustomMarkdownConverters::Img.new
+ReverseMarkdown::Converters.register :object, CustomMarkdownConverters::ObjectTag.new
+ReverseMarkdown::Converters.register :u, CustomMarkdownConverters::U.new
+ReverseMarkdown::Converters.register :p, CustomMarkdownConverters::P.new
 
 ##
 #
@@ -109,7 +172,8 @@ class AppleNote < AppleCloudKitRecord
                 :cloudkit_creator_record_id,
                 :cloudkit_modify_device,
                 :notestore,
-                :is_pinned
+                :is_pinned,
+                :folder
 
   ##
   # Creates a new AppleNote. Expects an Integer +z_pk+, an Integer +znote+ representing the ZICNOTEDATA.ZNOTE field, 
@@ -446,7 +510,7 @@ class AppleNote < AppleCloudKitRecord
     @html = html
   end
 
-  def generate_markdown
+  def generate_markdown(file_path:, html_directory:)
     return @markdown if @markdown
 
     metadata = {
@@ -455,8 +519,8 @@ class AppleNote < AppleCloudKitRecord
       "apple-notes-folder-name" => @folder.name,
       "apple-notes-folder-primary-key" => @folder.primary_key,
       "apple-notes-title" => @title,
-      "apple-notes-created" => @creation_time,
-      "apple-notes-modified" => @modify_time,
+      "apple-notes-created" => @creation_time.utc.iso8601,
+      "apple-notes-modified" => @modify_time.utc.iso8601,
     }
 
     if @is_pinned
@@ -481,10 +545,57 @@ class AppleNote < AppleCloudKitRecord
     # Handle the text to insert, only if we have plaintext to run
     if @plaintext
       markdown += "#{plaintext}" if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
-      markdown += ReverseMarkdown.convert(generate_html_text, github_flavored: true) if @notestore.version > AppleNoteStore::IOS_VERSION_9
+      html = generate_html_text
+      doc = Nokogiri::HTML(html)
+      doc.css("img,object").each do |tag|
+        case tag.name
+        when "img"
+          attribute = "src"
+        when "object"
+          attribute = "data"
+        end
+
+        url = tag.attributes[attribute].value
+
+        if url =~ %r{^\.\./files/Accounts/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/}i
+          path = File.join(html_directory, Addressable::URI.unencode(url))
+
+          index = 1
+          copy_path = nil
+          identical = false
+          base_attachment_name = sanitize_path(File.basename(path, ".*"))
+          loop do
+            if index > 1
+              file_name = "#{base_attachment_name}-#{index}"
+            else
+              file_name = base_attachment_name
+            end
+
+            copy_path = File.join(File.dirname(file_path), "attachments", "#{file_name}#{File.extname(path)}")
+            index += 1
+
+            if !File.exist?(copy_path)
+              break
+            elsif FileUtils.identical?(path, copy_path)
+              identical = true
+              break
+            end
+          end
+
+          unless identical
+            FileUtils.mkdir_p(File.dirname(copy_path))
+            FileUtils.cp(path, copy_path)
+          end
+
+          tag.attributes[attribute].value = Addressable::URI.encode("./attachments/#{File.basename(copy_path)}")
+        end
+      end
+      markdown += ReverseMarkdown.convert(doc.to_html, github_flavored: true).strip if @notestore.version > AppleNoteStore::IOS_VERSION_9
     else
       markdown += "{Contents not decrypted}" if @encrypted_data
     end
+
+    # markdown.gsub!("&nbsp;", "\u00A0")
 
     @markdown = markdown
   end
@@ -513,7 +624,7 @@ class AppleNote < AppleCloudKitRecord
     # Create a copy of the text, which is frozen
     note_text = root_node.note.note_text.dup
 
-    if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+    if note&.note_id == 793 || note&.note_id == 763 || note&.note_id == 1874 || note&.note_id == 1898
       puts "NOTE_TEXT: #{note_text.inspect}"
     end
 
@@ -522,12 +633,12 @@ class AppleNote < AppleCloudKitRecord
 
     # Iterate over the attribute runs to display stuffs
     root_node.note.attribute_run.each_with_index do |note_part, attribute_run_index|
-      if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+      if note&.note_id == 793 || note&.note_id == 763 || note&.note_id == 1874 || note&.note_id == 1898
         puts "NOTE_ID: #{note.note_id.inspect}"
         puts "NOTE_PART: #{note_part.inspect}"
         puts "ATTRIBUTE_RUN_INDEX: #{attribute_run_index.inspect}"
         puts "CURRENT_STYLE: #{current_style.inspect}"
-        puts "STYLE_TYPE: #{note_part.paragraph_style.style_type.inspect}"
+        puts "STYLE_TYPE: #{note_part.paragraph_style&.style_type&.inspect}"
       end
 
       # Clean up open style tags
@@ -543,7 +654,7 @@ class AppleNote < AppleCloudKitRecord
         when STYLE_TYPE_MONOSPACED
           html += "</code>"
         when STYLE_TYPE_NUMBERED_LIST
-          if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+          if note&.note_id == 793 || note&.note_id == 763 || note&.note_id == 1874 || note&.note_id == 1898
             puts "STALE: #{current_indent_amount.inspect}"
           end
 
@@ -558,7 +669,7 @@ class AppleNote < AppleCloudKitRecord
             open_div = false
           end
 
-          html += "</p>"
+          # html += "</p>"
         end
       end
 
@@ -588,7 +699,9 @@ class AppleNote < AppleCloudKitRecord
         if double_characters > 0
           slice_to_add = note_text.slice(current_index, note_part.length - double_characters)
         end
- 
+
+        slice_to_add = ERB::Util.html_escape(slice_to_add)
+
         # Deal with styling
         if note_part.paragraph_style
 
@@ -601,18 +714,14 @@ class AppleNote < AppleCloudKitRecord
           # Because similar checkboxes carry over past a line break, 
           # need to close it when we hit a different type
           if current_checkbox and !note_part_is_checkbox
-            html += "</li></ul>\n"
+            html += "</li></ul>"
             current_checkbox = nil
           end
 
           # Add in indents, this doesn't work so well
-          # if slice_to_add.include?("\n")
-          #   indents = 0
-          #   while indents < note_part.paragraph_style.indent_amount and !note_part_is_checkbox and !note_part_is_list do
-          #     html += "\t"
-          #     indents += 1
-          #   end
-          # end
+          if note_part.paragraph_style.indent_amount && !note_part_is_checkbox && !note_part_is_list
+            slice_to_add.gsub!("\n", "\n#{"\u00A0" * (note_part.paragraph_style.indent_amount * 4)}")
+          end
 
           # Add new style
           needs_new_style = (attribute_run_index == 0 or (note_part.paragraph_style.style_type != current_style) or current_style == STYLE_TYPE_CHECKBOX or ([STYLE_TYPE_NUMBERED_LIST, STYLE_TYPE_DOTTED_LIST, STYLE_TYPE_DASHED_LIST, STYLE_TYPE_CHECKBOX].include?(current_style) && note_part.paragraph_style.indent_amount != current_indent_amount))
@@ -631,6 +740,10 @@ class AppleNote < AppleCloudKitRecord
                 html += "</li></ol></li>"
               elsif current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount
                 html.sub!(/<\/li><li>\z/, "<ol>")
+                missing = note_part.paragraph_style.indent_amount - current_indent_amount - 1
+                missing.times do
+                  html += "<li><ol>"
+                end
               else
                 html += "<ol>"
               end
@@ -641,6 +754,10 @@ class AppleNote < AppleCloudKitRecord
                 html += "</li></ul></li>"
               elsif current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount
                 html.sub!(/<\/li><li>\z/, "<ul class='dotted'>")
+                missing = note_part.paragraph_style.indent_amount - current_indent_amount - 1
+                missing.times do
+                  html += "<li><ul class='dotted'>"
+                end
               else
                 html += "<ul class='dotted'>"
               end
@@ -651,6 +768,10 @@ class AppleNote < AppleCloudKitRecord
                 html += "</li></ul></li>"
               elsif current_indent_amount && note_part.paragraph_style.indent_amount > current_indent_amount
                 html.sub!(/<\/li><li>\z/, "<ul class='dashed'>")
+                missing = note_part.paragraph_style.indent_amount - current_indent_amount - 1
+                missing.times do
+                  html += "<li><ul class='dashed'>"
+                end
               else
                 html += "<ul class='dashed'>"
               end
@@ -715,7 +836,7 @@ class AppleNote < AppleCloudKitRecord
 
         # Deal with newlines
         if (current_style == STYLE_TYPE_NUMBERED_LIST or current_style == STYLE_TYPE_DOTTED_LIST or current_style == STYLE_TYPE_DASHED_LIST)
-          if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+          if note&.note_id == 793 || note&.note_id == 763 || note&.note_id == 1874 || note&.note_id == 1898
             puts "SLICE_TO_ADD BEFORE: #{slice_to_add.inspect}"
           end
           need_to_close_li = slice_to_add.end_with?("\n")
@@ -727,17 +848,17 @@ class AppleNote < AppleCloudKitRecord
 
         # Add in links that are part of the text itself
         if note_part.link and note_part.link.length > 0
-          slice_to_add = "<a href='#{CGI.escape(note_part.link)}' target='_blank'>#{slice_to_add}</a>"
+          slice_to_add = %(<a href="#{Addressable::URI.encode(note_part.link)}" target="_blank">#{slice_to_add}</a>)
         end
 
-        if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+        if note&.note_id == 793 || note&.note_id == 763 || note&.note_id == 1874 || note&.note_id == 1898
           puts "SLICE_TO_ADD: #{slice_to_add.inspect}"
         end
 
-        if current_style == STYLE_TYPE_DEFAULT
-          slice_to_add.gsub!("\n\n", "</p><p>")
-          slice_to_add.gsub!("\n", "<br>")
-        end
+        # if current_style == STYLE_TYPE_DEFAULT
+        #   slice_to_add.gsub!("\n\n", "</p><p>")
+        #   slice_to_add.gsub!("\n", "<br>")
+        # end
 
         # if current_style == STYLE_TYPE_DEFAULT && html.end_with?("\n") && !open_div
         #   html += "<div>"
@@ -791,7 +912,7 @@ class AppleNote < AppleCloudKitRecord
     when STYLE_TYPE_MONOSPACED
       html += "</code>"
     when STYLE_TYPE_NUMBERED_LIST
-      if note&.note_id == 1868 || note&.note_id == 1885 || note&.note_id == 1874 || note&.note_id == 1898
+      if note&.note_id == 793 || note&.note_id == 763 || note&.note_id == 1874 || note&.note_id == 1898
         puts "CLOSING: #{current_indent_amount.inspect}"
       end
 
@@ -808,7 +929,7 @@ class AppleNote < AppleCloudKitRecord
         open_div = false
       end
 
-      html += "</p>"
+      # html += "</p>"
     end
 
     # Remove any doubled tags
@@ -827,6 +948,22 @@ class AppleNote < AppleCloudKitRecord
     html.gsub!(/\n<\/h2>/,'</h2>') # Remove extra line breaks in front of h2
     html.gsub!(/\n<\/h3>/,'</h3>') # Remove extra line breaks in front of h3
     html.gsub!("\u2028",'<br/>') # Translate \u2028 used to denote newlines in lists into an actual HTML line break
+
+    html.gsub!("\n\n", "</p><p>")
+    html.gsub!("\n", "<br>")
+    # html.gsub!(/(<\/(h1|h2|h3|h4|h5|h6|div|p|ul|ol)>)<br>/, "\\1")
+    # html.gsub!(/<br>(<(h1|h2|h3|h4|h5|h6|div|p|ul|ol))/, "\\1")
+    html.gsub!(/(<p>)<br>(<(h1|h2|h3|h4|h5|h6|div|p|ul|ol))/, "\\1\\2")
+
+    html.gsub!(%r{<code>(.*?)</code>}) do |match|
+      replace = match
+      content = $1
+      if $1 =~ /<(br|p)>/
+        replace = "<pre>#{content}</pre>"
+      end
+
+      replace
+    end
 
     html
   end

@@ -1,4 +1,7 @@
+require 'addressable'
+require 'erb'
 require 'keyed_archive'
+require 'marcel'
 require 'sqlite3'
 require_relative 'notestore_pb.rb'
 require_relative 'AppleCloudKitRecord.rb'
@@ -451,14 +454,14 @@ class AppleNotesEmbeddedObject < AppleCloudKitRecord
   # This method generates the HTML to be embedded into an AppleNote's HTML for objects that use thumbnails.
   def generate_html_with_images
     return @thumbnails.first.generate_html if @thumbnails.length > 0
-    return "<img src='../#{@reference_location}' />" if @reference_location
+    return %(<img src="#{Addressable::URI.encode("../#{@reference_location}")}" />) if @reference_location
     return "{#{type} missing due to not having a file reference location}"
   end
 
   ##
   # This method generates the HTML to be embedded into an AppleNote's HTML for objects that are just downloadable.
   def generate_html_with_link(type="Media")
-    return "<a href='../#{@reference_location}'>#{type} #{@filename}</a>" if @reference_location
+    return %(<object data="#{Addressable::URI.encode("../#{@reference_location}")}" type="#{Addressable::URI.encode(Marcel::MimeType.for(extension: File.extname(@reference_location)))}">#{ERB::Util.html_escape("#{type} #{@filename}")}</object>) if @reference_location
     return "{#{type} missing due to not having a file reference location}"
   end
 

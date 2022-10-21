@@ -1,4 +1,6 @@
+require 'addressable'
 require 'csv'
+require 'fileutils'
 require 'json'
 require 'logger'
 require 'optparse'
@@ -139,6 +141,21 @@ case backup_type
     apple_backup = AppleBackupMac.new(target_directory, output_directory)
 end
 
+def sanitize_path(name)
+  sanitized = name.strip
+  if sanitized.start_with?(".")
+    sanitized = "_#{name}"
+  end
+  sanitized.gsub!(/\s+/, " ")
+  sanitized.gsub!(/[^0-9A-Za-z.\-_ ,]/, "-")
+  sanitized.gsub!(/-{2,}/, "-")
+  sanitized.delete_prefix!("-")
+  sanitized.delete_suffix!("-")
+  sanitized.strip!
+
+  sanitized
+end
+
 # Check for a valid AppleBackup, if it is ready, rip the notes and spit out CSVs
 if apple_backup and apple_backup.valid? and apple_backup.note_stores.first.valid_notes?
 
@@ -222,8 +239,39 @@ if apple_backup and apple_backup.valid? and apple_backup.note_stores.first.valid
     # Write out the Markdown files
     logger.debug("Writing Markdown for Note Store")
     note_store.notes.each do |key, note|
-      File.open(markdown_directory + "#{backup_number}_#{note.note_id}.md", "wb") do |file|
-        file.write(note.generate_markdown)
+      base_file_name = sanitize_path(note.title)
+
+      parent_dirs = []
+      folder = note.folder
+      loop do
+        parent_dirs << folder.name
+        folder = folder.parent
+        break unless folder
+      end
+
+      index = 1
+      file_path = nil
+      loop do
+        if index > 1
+          file_name = "#{base_file_name}-#{index}"
+        else
+          file_name = base_file_name
+        end
+
+        dirs = parent_dirs.reverse.map do |dir|
+          sanitize_path(dir)
+        end
+
+        file_path = File.join(markdown_directory, *dirs, "#{file_name}.md")
+        index += 1
+
+        break unless File.exist?(file_path)
+      end
+
+      FileUtils.mkdir_p(File.dirname(file_path))
+      File.open(file_path, "wb") do |file|
+        markdown = note.generate_markdown(file_path: file_path, html_directory: html_directory)
+        file.puts(markdown)
       end
     end
 
