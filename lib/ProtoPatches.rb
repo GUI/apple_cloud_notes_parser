@@ -35,8 +35,8 @@ class AttributeRun
 
   attr_accessor :previous_run, :next_run
 
-  def has_style_type
-    paragraph_style and paragraph_style.style_type
+  def has_style_type(style = paragraph_style)
+    style and style.style_type
   end
 
   def same_style?(other_attribute_run)
@@ -60,6 +60,7 @@ class AttributeRun
   # This method checks if the previous AttributeRun had the same style_type
   def same_style_type_previous?
     same_style_type?(previous_run)
+    # same_style_type?(previous_run) && previous_run.paragraph_style.indent_amount == paragraph_style.indent_amount
   end
 
   ##
@@ -81,8 +82,13 @@ class AttributeRun
     # If neither has a style type, that is the same
     return true if (!other_attribute_run.has_style_type and !has_style_type)
 
+    return false if (other_attribute_run.paragraph_style.indent_amount != paragraph_style.indent_amount)
+
+    return false if (is_checkbox? && other_attribute_run.is_checkbox? && other_attribute_run.paragraph_style.checklist.uuid != paragraph_style.checklist.uuid)
+
     # Compare our style_type to the other style_type and return the result
-    return (other_attribute_run.paragraph_style.style_type == paragraph_style.style_type)  
+    return (other_attribute_run.paragraph_style.style_type == paragraph_style.style_type)
+    # return (other_attribute_run.paragraph_style.style_type == paragraph_style.style_type && other_attribute_run.paragraph_style.indent_amount == paragraph_style.indent_amount)
   end
 
   ##
@@ -106,32 +112,32 @@ class AttributeRun
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_CHECKBOX.
-  def is_checkbox?
-    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_CHECKBOX)
+  def is_checkbox?(style = paragraph_style)
+    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_CHECKBOX)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_NUMBERED_LIST.
-  def is_numbered_list?
-    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_NUMBERED_LIST)
+  def is_numbered_list?(style = paragraph_style)
+    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_NUMBERED_LIST)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_DOTTED_LIST.
-  def is_dotted_list?
-    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_DOTTED_LIST)
+  def is_dotted_list?(style = paragraph_style)
+    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_DOTTED_LIST)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_DASHED_LIST.
-  def is_dashed_list?
-    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_DASHED_LIST)
+  def is_dashed_list?(style = paragraph_style)
+    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_DASHED_LIST)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is any sort of AppleNote::STYLE_TYPE_X_LIST.
-  def is_any_list?
-    return (is_numbered_list? or is_dotted_list? or is_dashed_list?)
+  def is_any_list?(style = paragraph_style)
+    return (is_numbered_list?(style) or is_dotted_list?(style) or is_dashed_list?(style) or is_checkbox?(style))
   end
 
   ##
@@ -170,21 +176,49 @@ class AttributeRun
  
     # Deal with the style type 
     if has_style_type and !same_style_type_previous?
-      case paragraph_style.style_type
-      when AppleNote::STYLE_TYPE_TITLE
-        html += "<h1>"
-      when AppleNote::STYLE_TYPE_HEADING
-        html += "<h2>"
-      when AppleNote::STYLE_TYPE_SUBHEADING
-        html += "<h3>"
-      when AppleNote::STYLE_TYPE_MONOSPACED
-        html += "<code>"
-      when AppleNote::STYLE_TYPE_NUMBERED_LIST
-        html += "<ol><li>"
-      when AppleNote::STYLE_TYPE_DOTTED_LIST
-        html += "<ul><li>"
-      when AppleNote::STYLE_TYPE_DASHED_LIST
-        html += "<ul><li>"
+      if is_any_list?
+        li_attrs = ""
+        if is_checkbox?
+          # Set the style to apply to the list item
+          li_attrs = " class='unchecked'"
+          li_attrs = " class='checked'" if paragraph_style.checklist.done == 1
+        end
+
+        if is_any_list?(previous_run&.paragraph_style) && paragraph_style.indent_amount < previous_run.paragraph_style.indent_amount
+          html += "<li data-foo='1' #{li_attrs}>"
+        elsif is_checkbox? && is_checkbox?(previous_run&.paragraph_style) && paragraph_style.indent_amount == previous_run.paragraph_style.indent_amount
+          html += "<li data-foo='2' #{li_attrs}>"
+        # elsif is_checkbox? && previous_run&.is_checkbox? && previous_run.paragraph_style.checklist.uuid != paragraph_style.checklist.uuid
+          # html += "</li><li#{li_attrs}>"
+        else
+          case paragraph_style.style_type
+          when AppleNote::STYLE_TYPE_NUMBERED_LIST
+            html += "<ol><li#{li_attrs}>"
+          when AppleNote::STYLE_TYPE_DOTTED_LIST
+            html += "<ul class='dotted'><li#{li_attrs}>"
+          when AppleNote::STYLE_TYPE_DASHED_LIST
+            html += "<ul class='dashed'><li#{li_attrs}>"
+          when AppleNote::STYLE_TYPE_CHECKBOX
+            html += "<ul class='checklist'><li#{li_attrs}>"
+          end
+        end
+      else
+        case paragraph_style.style_type
+        when AppleNote::STYLE_TYPE_TITLE
+          html += "<h1>"
+        when AppleNote::STYLE_TYPE_HEADING
+          html += "<h2>"
+        when AppleNote::STYLE_TYPE_SUBHEADING
+          html += "<h3>"
+        when AppleNote::STYLE_TYPE_MONOSPACED
+          html += "<code>"
+        when AppleNote::STYLE_TYPE_NUMBERED_LIST
+          html += "<ol><li>"
+        when AppleNote::STYLE_TYPE_DOTTED_LIST
+          html += "<ul class='dotted'><li>"
+        when AppleNote::STYLE_TYPE_DASHED_LIST
+          html += "<ul class='dashed'><li>"
+        end
       end
     end
 
@@ -193,6 +227,7 @@ class AttributeRun
     #  html += "\t-"
     #end
   
+=begin
     # Handle AppleNote::STYLE_TYPE_CHECKBOX separately because they're special
     if is_checkbox?
       # Set the style to apply to the list item
@@ -205,6 +240,7 @@ class AttributeRun
         html += "</li><li class='#{style}'>"
       end
     end
+=end
 
     # Deal with the font
     if font_weight and !same_font_weight_previous?
@@ -263,12 +299,21 @@ class AttributeRun
     # Escape HTML in the actual text of the note
     text_to_insert = CGI::escapeHTML(text_to_insert)
 
+=begin
+    if (!is_any_list? and !is_checkbox? and total_indent > 0)
+      indent = "\u00A0" * (total_indent * 4)
+      puts "Total indent: #{total_indent} #{indent.inspect} #{text_to_insert.inspect}"
+      text_to_insert.gsub!("\n", "\n#{indent}")
+    end
+    puts "TO INSERT: #{text_to_insert.inspect}"
+=end
+
     closed_font = false
     need_to_close_li = false
     # Edit the text if we need to make small changes based on the paragraph style
-    if is_any_list?
-      need_to_close_li = text_to_insert.end_with?("\n")
-      text_to_insert = text_to_insert.split("\n").join("</li><li>")
+    if is_any_list? and !is_checkbox?
+      need_to_close_li = text_to_insert.end_with?("\n") && !is_any_list?(next_run&.paragraph_style)
+      text_to_insert = text_to_insert.split("\n").join("</li><li class='2'>")
 
       # Check it see if we have an open list element...
       if need_to_close_li
@@ -338,28 +383,60 @@ class AttributeRun
     end
 
     if need_to_close_li
-      html += "</li><li>"
+      # html += "</li><li class='1'>"
     end
 
     # Close the style type if this is the last AttributeRun or if the next is different
     if has_style_type and !same_style_type_next?
-      case paragraph_style.style_type
-      when AppleNote::STYLE_TYPE_TITLE
-        html += "</h1>" 
-      when AppleNote::STYLE_TYPE_HEADING
-        html += "</h2>" 
-      when AppleNote::STYLE_TYPE_SUBHEADING
-        html += "</h3>" 
-      when AppleNote::STYLE_TYPE_MONOSPACED
-        html += "</code>" 
-      when AppleNote::STYLE_TYPE_NUMBERED_LIST
-        html += "</li></ol>" 
-      when AppleNote::STYLE_TYPE_DOTTED_LIST
-        html += "</li></ul>" 
-      when AppleNote::STYLE_TYPE_DASHED_LIST
-        html += "</li></ul>" 
-      when AppleNote::STYLE_TYPE_CHECKBOX
-        html += "</li></ul>" 
+      if is_any_list?
+        if is_any_list?(next_run&.paragraph_style) && next_run.paragraph_style.indent_amount < paragraph_style.indent_amount
+          case paragraph_style.style_type
+          when AppleNote::STYLE_TYPE_NUMBERED_LIST
+            html += "</li></ol></li>"
+          when AppleNote::STYLE_TYPE_DOTTED_LIST, AppleNote::STYLE_TYPE_DASHED_LIST, AppleNote::STYLE_TYPE_CHECKBOX
+            html += "</li></ul class='1'></li>"
+          end
+        elsif is_any_list?(next_run&.paragraph_style) && next_run.paragraph_style.indent_amount > paragraph_style.indent_amount
+          html += ""
+        elsif is_any_list?(next_run&.paragraph_style) && next_run.paragraph_style.indent_amount == paragraph_style.indent_amount
+          html += "</li>"
+        else
+          case paragraph_style.style_type
+          when AppleNote::STYLE_TYPE_NUMBERED_LIST
+            html += "</li></ol>" * (paragraph_style.indent_amount)
+            html += "</li>"
+            if !is_any_list?(next_run&.paragraph_style)
+              html += "</ol class='3'>"
+            end
+          when AppleNote::STYLE_TYPE_DOTTED_LIST, AppleNote::STYLE_TYPE_DASHED_LIST, AppleNote::STYLE_TYPE_CHECKBOX
+            html += "</li></ul class='2'>" * (paragraph_style.indent_amount)
+            html += "</li>"
+            if !is_any_list?(next_run&.paragraph_style)
+              puts "HTML: #{html.inspect}"
+              puts "NEXT_RUN: #{next_run&.paragraph_style.inspect}"
+              html += "</ul class='3'>"
+            end
+          end
+        end
+      else
+        case paragraph_style.style_type
+        when AppleNote::STYLE_TYPE_TITLE
+          html += "</h1>\n" 
+        when AppleNote::STYLE_TYPE_HEADING
+          html += "</h2>\n" 
+        when AppleNote::STYLE_TYPE_SUBHEADING
+          html += "</h3>\n" 
+        when AppleNote::STYLE_TYPE_MONOSPACED
+          html += "</code>" 
+        when AppleNote::STYLE_TYPE_NUMBERED_LIST
+          html += "</li></ol>" 
+        when AppleNote::STYLE_TYPE_DOTTED_LIST
+          html += "</li></ul>" 
+        when AppleNote::STYLE_TYPE_DASHED_LIST
+          html += "</li></ul>" 
+        when AppleNote::STYLE_TYPE_CHECKBOX
+          html += "</li></ul>" 
+        end
       end
     end
 
