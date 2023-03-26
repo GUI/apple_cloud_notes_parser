@@ -198,11 +198,15 @@ class AttributeRun
       when AppleNote::FONT_TYPE_DEFAULT
         # Do nothing
       when AppleNote::FONT_TYPE_BOLD
-        open_html_tag("b")
+        if @active_html_node.node_name != "h1" && @active_html_node.node_name != "h2" && @active_html_node.node_name != "h3"
+          open_html_tag("b")
+        end
       when AppleNote::FONT_TYPE_ITALIC
         open_html_tag("i")
       when AppleNote::FONT_TYPE_BOLD_ITALIC
-        open_html_tag("b")
+        if @active_html_node.node_name != "h1" && @active_html_node.node_name != "h2" && @active_html_node.node_name != "h3"
+          open_html_tag("b")
+        end
         open_html_tag("i")
       end
     end
@@ -254,8 +258,17 @@ class AttributeRun
   def add_html_text(text_to_insert)
     text_to_insert.split(/(\u2028|\n)/).each_with_index do |line, i|
       case line
-      when "\u2028", "\n"
+      when "\u2028"
         @active_html_node.add_child(Nokogiri::XML::Node.new("br", @active_html_node.document))
+      when "\n"
+        case @active_html_node.node_name
+        when "pre"
+          add_inline_html("\n")
+        when "h1", "h2", "h3"
+          # Do nothing
+        else
+          @active_html_node.add_child(Nokogiri::XML::Node.new("br", @active_html_node.document))
+        end
       else
         add_inline_html(line)
       end
@@ -270,6 +283,7 @@ class AttributeRun
     puts "GENERATE HTML NODE: #{node.node_name.inspect}"
     @active_html_node = node
     @html_added_tag_depth = 0
+    begin_tag_name = @active_html_node.node_name
 
     if has_style_type and !same_style_type_previous?
       case paragraph_style.style_type
@@ -301,7 +315,11 @@ class AttributeRun
       end
 
       if list_tag
-        indent = paragraph_style&.indent_amount.to_i - previous_run&.paragraph_style&.indent_amount.to_i + 1
+        indent = paragraph_style&.indent_amount.to_i - previous_run&.paragraph_style&.indent_amount.to_i
+        puts "LIST INDENT RAW: #{indent.inspect}"
+        if indent <= 0 && !previous_run&.is_any_list?
+          indent = 1
+        end
         puts "LIST INDENT: #{indent.inspect}"
 
         indent.times do |index|
@@ -331,12 +349,17 @@ class AttributeRun
       # puts "LIST TEXT TO INSERT: #{text_to_insert.inspect}"
       # puts "LIST TEXT TO INSERT node type: #{@active_html_node.node_name.inspect}"
       puts "LIST NODE: #{@active_html_node.node_name.inspect}"
-      text_to_insert.split(/(\n)/).each_with_index do |list_item_text, index|
+      list_items = text_to_insert.split(/(\n)/)
+      list_items.each_with_index do |list_item_text, index|
         if list_item_text == "\n"
-          close_html_tag(track_depth: false)
+          if index != list_items.length - 1
+            # close_html_tag(track_depth: false)
+            close_html_tag
+          end
         else
           if @active_html_node.node_name != "li"
-            open_html_tag("li", li_attrs, track_depth: false)
+            # open_html_tag("li", li_attrs, track_depth: false)
+            open_html_tag("li", li_attrs)
           end
 
           add_html_text(list_item_text)
@@ -348,9 +371,23 @@ class AttributeRun
 
     puts "CLOSING X TIMES RAW: #{@html_added_tag_depth}"
     if has_style_type
-      indent = paragraph_style&.indent_amount.to_i - next_run&.paragraph_style&.indent_amount.to_i + 1
+      indent = paragraph_style&.indent_amount.to_i - next_run&.paragraph_style&.indent_amount.to_i
+      indent2 = previous_run&.paragraph_style&.indent_amount.to_i - next_run&.paragraph_style&.indent_amount.to_i
       puts "CLOSING INDENT: #{indent.inspect}"
-      if !same_style_type_previous? && same_style_type_next?
+      puts "CLOSING INDENT2: #{indent2.inspect}"
+      puts "CLOSING TAG: #{@active_html_node.node_name.inspect}"
+      if @active_html_node.node_name == "li" && indent < 0
+        @html_added_tag_depth = 0
+      elsif @active_html_node.node_name == "li" && indent >= 0
+        if indent > 0
+          @html_added_tag_depth += 1
+        end
+
+        case begin_tag_name
+        when "ol", "ul"
+          @html_added_tag_depth += 1
+        end
+      elsif !same_style_type_previous? && same_style_type_next?
         @html_added_tag_depth -= indent
       elsif same_style_type_previous? && !same_style_type_next?
         @html_added_tag_depth += indent
@@ -361,7 +398,9 @@ class AttributeRun
     @html_added_tag_depth.times do
       # puts "CLOSING NODE: #{@active_html_node.inspect}"
       # puts "CLOSING NODE.PARENT: #{@active_html_node.parent.inspect}"
+      puts "CLOSING X BEFORE: #{@active_html_node.node_name.inspect}"
       close_html_tag
+      puts "CLOSING X AFTER: #{@active_html_node.node_name.inspect}"
     end
 
 

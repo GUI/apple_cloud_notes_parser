@@ -479,7 +479,7 @@ class AppleNote < AppleCloudKitRecord
     end
 =end
 
-    builder = Nokogiri::HTML::Builder.new do |doc|
+    builder = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
       doc.html {
         doc.body {
           doc.h1 {
