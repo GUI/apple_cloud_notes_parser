@@ -1,7 +1,9 @@
 require 'cgi'
 require 'keyed_archive'
 require 'sqlite3'
+require "nokogiri"
 require 'zlib'
+require "ox"
 require_relative 'ProtoPatches.rb'
 require_relative 'AppleCloudKitRecord.rb'
 require_relative 'AppleNotesEmbeddedObject.rb'
@@ -24,6 +26,9 @@ require_relative 'AppleNotesEmbeddedPublicVideo.rb'
 require_relative 'AppleNotesEmbeddedTable.rb'
 require_relative 'AppleNoteStore.rb'
 require_relative 'AppleUniformTypeIdentifier.rb'
+require "nokogiri-pretty"
+
+$xsl = Nokogiri::XSLT(File.open("indent.xsl"))
 
 ##
 #
@@ -381,21 +386,22 @@ class AppleNote < AppleCloudKitRecord
   # This method generates HTML to represent this Note, its 
   # metadata, and its contents, if applicable. It does not generate 
   # full HTML, just enough for this note's card to be displayed.
+=begin
   def generate_html
 
     # Bail quickly if we've ever taken the time to build this before
     return @html if @html
 
     html = "<a id='note_#{@note_id}'><h1>Note #{@note_id}#{" (📌)" if @is_pinned}</h1></a>\n"
-    html += "<b>Account:</b> #{@account.name} <br />\n"
-    html += "<b>Folder:</b> <a href='#folder_#{@folder.primary_key}'>#{@folder.name}</a> <br/>\n"
-    html += "<b>Title:</b> #{@title} <br/>\n"
-    html += "<b>Created:</b> #{@creation_time} <br/>\n"
-    html += "<b>Modified:</b> #{@modify_time} <br />\n"
-    html += "<b>CloudKit Creator:</b> #{@notestore.cloud_kit_participants[@cloudkit_creator_record_id].email} <br />\n" if cloud_kit_record_known?(@cloudkit_creator_record_id, @notestore.cloud_kit_participants)
-    html += "<b>CloudKit Last Modified User:</b> #{@notestore.cloud_kit_participants[@cloudkit_modifier_record_id].email} <br />\n" if cloud_kit_record_known?(@cloudkit_modifier_record_id, @notestore.cloud_kit_participants)
-    html += "<b>CloudKit Last Modified Device:</b> #{@cloudkit_last_modified_device} <br />\n" if @cloudkit_last_modified_device
-    html += "<b>Tags:</b> #{self.get_all_tags.join(", ")}<br />\n" if self.has_tags
+    html += "<b>Account:</b> #{CGI::escapeHTML(@account.name)} <br />\n"
+    html += "<b>Folder:</b> <a href='#folder_#{@folder.primary_key}'>#{CGI::escapeHTML(@folder.name)}</a> <br/>\n"
+    html += "<b>Title:</b> #{CGI::escapeHTML(@title)} <br/>\n"
+    html += "<b>Created:</b> #{CGI::escapeHTML(@creation_time.to_s)} <br/>\n"
+    html += "<b>Modified:</b> #{CGI::escapeHTML(@modify_time.to_s)} <br />\n"
+    html += "<b>CloudKit Creator:</b> #{CGI::escapeHTML(@notestore.cloud_kit_participants[@cloudkit_creator_record_id].email || "")} <br />\n" if cloud_kit_record_known?(@cloudkit_creator_record_id, @notestore.cloud_kit_participants)
+    html += "<b>CloudKit Last Modified User:</b> #{CGI::escapeHTML(@notestore.cloud_kit_participants[@cloudkit_modifier_record_id].email || "")} <br />\n" if cloud_kit_record_known?(@cloudkit_modifier_record_id, @notestore.cloud_kit_participants)
+    html += "<b>CloudKit Last Modified Device:</b> #{CGI::escapeHTML(@cloudkit_last_modified_device)} <br />\n" if @cloudkit_last_modified_device
+    html += "<b>Tags:</b> #{CGI::escapeHTML(self.get_all_tags.join(", "))}<br />\n" if self.has_tags
     html += "<div class='note-content'>\n"
 
     # Handle the text to insert, only if we have plaintext to run
@@ -407,7 +413,154 @@ class AppleNote < AppleCloudKitRecord
     end
     html += "</div> <!-- Close the 'note-content' div -->\n"
 
+
+    puts "FULL HTML: #{html.inspect}"
+    puts $xsl.apply_to(Nokogiri::XML("<div>#{html}</div>")).to_s
+    doc = Nokogiri::XML.fragment(html) { |config| config.strict }
+
     @html = html
+  end
+=end
+
+  def generate_html
+
+    # Bail quickly if we've ever taken the time to build this before
+    return @html if @html
+
+=begin
+    Ox.default_options = {encoding: 'UTF-8'}
+    doc = Ox::Document.new
+
+    doc = Ox::Builder.new
+    doc.instruct("xml", :encoding => "UTF-8")
+    doc.element "html" do
+      doc.element "body" do
+        doc.element "h1" do
+          doc.element "a", id: "note_#{@note_id}" do
+            doc.text "Note #{@note_id}#{" (📌)" if @is_pinned}"
+          end
+        end
+
+        doc.element "div" do
+          doc.element "b" do
+            doc.text "Account:"
+          end
+
+          doc.text " "
+          doc.text @account.name
+        end
+
+        doc.element "div" do
+          doc.element "b" do
+            doc.text "Folder:"
+          end
+
+          doc.text " "
+          doc.element "a", href: "#folder_#{@folder.primary_key}" do
+            doc.text @folder.name
+          end
+        end
+
+        doc.element "div", class: "note-content" do
+          # Handle the text to insert, only if we have plaintext to run
+          if @plaintext
+            if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
+              doc.text plaintext
+            end
+
+            if @notestore.version > AppleNoteStore::IOS_VERSION_9
+              doc.raw generate_html_text
+            end
+          elsif @encrypted_data
+            doc.text "{Contents not decrypted}"
+          end
+        end
+      end
+    end
+=end
+
+    builder = Nokogiri::HTML::Builder.new do |doc|
+      doc.html {
+        doc.body {
+          doc.h1 {
+            doc.a(id: "note_#{@note_id}") {
+              doc.text "Note #{@note_id}#{" (📌)" if @is_pinned}"
+            }
+          }
+
+          doc.div {
+            doc.b {
+              doc.text "Account:"
+            }
+
+            doc.text " "
+            doc.text @account.name
+          }
+
+          doc.div {
+            doc.b {
+              doc.text "Folder:"
+            }
+
+            doc.text " "
+            doc.a(href: "#folder_#{@folder.primary_key}") {
+              doc.text @folder.name
+            }
+          }
+
+          doc.div(class: "note-content") {
+            # Handle the text to insert, only if we have plaintext to run
+            if @plaintext
+              if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
+                doc.text plaintext
+              end
+
+              if @notestore.version > AppleNoteStore::IOS_VERSION_9
+                doc << generate_html_text
+              end
+            elsif @encrypted_data
+              doc.text "{Contents not decrypted}"
+            end
+
+          }
+        }
+      }
+    end
+
+    puts builder.inspect
+=begin
+    html = "<a id='note_#{@note_id}'><h1>Note #{@note_id}#{" (📌)" if @is_pinned}</h1></a>\n"
+    html += "<b>Account:</b> #{CGI::escapeHTML(@account.name)} <br />\n"
+    html += "<b>Folder:</b> <a href='#folder_#{@folder.primary_key}'>#{CGI::escapeHTML(@folder.name)}</a> <br/>\n"
+    html += "<b>Title:</b> #{CGI::escapeHTML(@title)} <br/>\n"
+    html += "<b>Created:</b> #{CGI::escapeHTML(@creation_time.to_s)} <br/>\n"
+    html += "<b>Modified:</b> #{CGI::escapeHTML(@modify_time.to_s)} <br />\n"
+    html += "<b>CloudKit Creator:</b> #{CGI::escapeHTML(@notestore.cloud_kit_participants[@cloudkit_creator_record_id].email || "")} <br />\n" if cloud_kit_record_known?(@cloudkit_creator_record_id, @notestore.cloud_kit_participants)
+    html += "<b>CloudKit Last Modified User:</b> #{CGI::escapeHTML(@notestore.cloud_kit_participants[@cloudkit_modifier_record_id].email || "")} <br />\n" if cloud_kit_record_known?(@cloudkit_modifier_record_id, @notestore.cloud_kit_participants)
+    html += "<b>CloudKit Last Modified Device:</b> #{CGI::escapeHTML(@cloudkit_last_modified_device)} <br />\n" if @cloudkit_last_modified_device
+    html += "<b>Tags:</b> #{CGI::escapeHTML(self.get_all_tags.join(", "))}<br />\n" if self.has_tags
+    html += "<div class='note-content'>\n"
+
+    # Handle the text to insert, only if we have plaintext to run
+    if @plaintext
+      html += "#{plaintext}" if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
+      html += generate_html_text if @notestore.version > AppleNoteStore::IOS_VERSION_9
+    else
+      html += "{Contents not decrypted}" if @encrypted_data
+    end
+    html += "</div> <!-- Close the 'note-content' div -->\n"
+
+
+=end
+    puts "FULL HTML: #{builder.doc.to_xhtml(indent: 2)}"
+    puts $xsl.apply_to(builder.doc).to_s
+    #puts "FULL HTML: #{doc.to_s}"
+    #puts "FULL HTML: #{doc.to_s.encoding.inspect}"
+    #puts $xsl.apply_to(Nokogiri::XML("<div>#{html}</div>")).to_s
+    #doc = Nokogiri::XML.fragment(html) { |config| config.strict }
+
+    @html = builder.to_html
+    # @html = doc.to_s
   end
 
   ##
@@ -415,7 +568,10 @@ class AppleNote < AppleCloudKitRecord
   # a Hash of AppleNotesEmbeddedObjects as +embedded_objects+. It returns a String containing 
   # appropriate HTML for the document.
   def self.htmlify_document(document_proto, embedded_objects)
-    html = ""
+    doc = Nokogiri::XML("<div/>")
+    node = doc.root
+    # puts "NODE: #{node.inspect}"
+    # html = ""
 
     # Tables cells will be a MergableDataProto
     root_node = document_proto
@@ -465,9 +621,10 @@ class AppleNote < AppleCloudKitRecord
       if note_part.attachment_info
 
         if embedded_objects[embedded_object_index]
-          html += embedded_objects[embedded_object_index].generate_html
+          # puts embedded_objects[embedded_object_index].class.name.inspect
+          # doc << embedded_objects[embedded_object_index].generate_html
         else
-          html += "[Object missing, this is common for deleted notes]"
+          doc << "[Object missing, this is common for deleted notes]"
         end
         embedded_object_index += 1
         current_index += note_part.length
@@ -495,7 +652,8 @@ class AppleNote < AppleCloudKitRecord
         next_run = condensed_attribute_runs[attribute_run_index + 1] if attribute_run_index < condensed_attribute_runs.length - 1
 
         # Pull the HTML to insert
-        html += note_part.generate_html(slice_to_add)
+        # doc << note_part.generate_html(slice_to_add)
+        node = note_part.generate_html(slice_to_add, node)
 
         # Increment our counter to be sure we don't loop infinitely
         current_index += (note_part.length - double_characters)
@@ -504,7 +662,7 @@ class AppleNote < AppleCloudKitRecord
 
     end
 
-    html
+    doc.to_html
   end
 
   ##
@@ -524,6 +682,7 @@ class AppleNote < AppleCloudKitRecord
   
     # Now using a function designed specifically for turning attribute runs into HTML from anyy source  
     html = AppleNote.htmlify_document(tmp_note_store_proto, @embedded_objects)
+    puts "HTML: #{html.inspect}"
     return html
   end
 
