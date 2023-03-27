@@ -33,7 +33,7 @@ end
 
 class AttributeRun
 
-  attr_accessor :previous_run, :next_run
+  attr_accessor :previous_run, :next_run, :tag_is_open
 
   def has_style_type(style = paragraph_style)
     style and style.style_type
@@ -283,9 +283,12 @@ class AttributeRun
     puts "GENERATE HTML NODE: #{node.node_name.inspect}"
     @active_html_node = node
     @html_added_tag_depth = 0
+    @tag_is_open = !text_to_insert.end_with?("\n")
     begin_tag_name = @active_html_node.node_name
 
     if has_style_type and !same_style_type_previous?
+      @active_html_node = @active_html_node.document.root
+      puts "GENERATE HTML NODE AFTER: #{@active_html_node.node_name.inspect}"
       case paragraph_style.style_type
       when AppleNote::STYLE_TYPE_TITLE
         open_html_tag("h1")
@@ -295,40 +298,79 @@ class AttributeRun
         open_html_tag("h3")
       when AppleNote::STYLE_TYPE_MONOSPACED
         open_html_tag("pre")
-      when AppleNote::STYLE_TYPE_NUMBERED_LIST
-        list_tag = "ol"
-        list_attrs = {}
-      when AppleNote::STYLE_TYPE_DOTTED_LIST
-        list_tag = "ul"
-        list_attrs = { class: "dotted" }
-      when AppleNote::STYLE_TYPE_DASHED_LIST
-        list_tag = "ul"
-        list_attrs = { class: "dashed" }
-      when AppleNote::STYLE_TYPE_CHECKBOX
-        list_tag = "ul"
-        list_attrs = { class: "checklist" }
-      else
-        if paragraph_style&.indent_amount > 0
-          list_tag = "ul"
-          list_attrs = { class: "none" }
-        end
       end
+    end
 
-      if list_tag
-        indent = paragraph_style&.indent_amount.to_i - previous_run&.paragraph_style&.indent_amount.to_i
-        puts "LIST INDENT RAW: #{indent.inspect}"
-        if indent <= 0 && !previous_run&.is_any_list?
-          indent = 1
+    case paragraph_style&.style_type
+    when AppleNote::STYLE_TYPE_NUMBERED_LIST
+      list_tag = "ol"
+      list_attrs = {}
+    when AppleNote::STYLE_TYPE_DOTTED_LIST
+      list_tag = "ul"
+      list_attrs = { class: "dotted" }
+    when AppleNote::STYLE_TYPE_DASHED_LIST
+      list_tag = "ul"
+      list_attrs = { class: "dashed" }
+    when AppleNote::STYLE_TYPE_CHECKBOX
+      list_tag = "ul"
+      list_attrs = { class: "checklist" }
+    else
+      if paragraph_style&.indent_amount.to_i > 0
+        list_tag = "ul"
+        list_attrs = { class: "none" }
+      end
+    end
+
+    if list_tag
+      depth = paragraph_style&.indent_amount.to_i
+      unless is_any_list?
+        depth -= 1
+      end
+      puts "DEPTH: #{depth.inspect}"
+
+      inside_li = false
+      if paragraph_style&.style_type != previous_run&.paragraph_style&.style_type && paragraph_style&.indent_amount.to_i == 0
+        puts "USING ROOT-diff"
+        @active_html_node = @active_html_node.document.root
+      elsif previous_run&.is_any_list? || previous_run&.paragraph_style&.indent_amount.to_i > 0
+        if paragraph_style&.indent_amount.to_i > previous_run&.paragraph_style&.indent_amount.to_i || (paragraph_style&.indent_amount.to_i == previous_run&.paragraph_style&.indent_amount.to_i && previous_run&.tag_is_open)
+          puts "FINDING LAST LI"
+          inside_li = true
+          @active_html_node = @active_html_node.document.last_element_child.css("li").last || @active_html_node.document.root
+        elsif depth >= 0
+          puts "FINDING LAST UL"
+          @active_html_node = @active_html_node.document.last_element_child.css("[data-apple-notes-indent-amount=#{paragraph_style&.indent_amount.to_i}]").last || @active_html_node.document.root
         end
-        puts "LIST INDENT: #{indent.inspect}"
+      else
+        puts "USING ROOT"
+        @active_html_node = @active_html_node.document.root
+      end
+      unless @active_html_node
+        puts node.document.to_html
+      end
+      puts "GENERATE HTML ACTIVE NODE: #{@active_html_node.node_name.inspect}"
 
-        indent.times do |index|
-          if index > 0
-            open_html_tag("li")
-          end
+      indent = paragraph_style&.indent_amount.to_i - previous_run&.paragraph_style&.indent_amount.to_i + 1
+      puts "LIST INDENT RAW: #{indent.inspect}"
+      if indent <= 0 && (!previous_run&.is_any_list? || paragraph_style&.style_type != previous_run&.paragraph_style&.style_type)
+        indent = 1
+      end
+      puts "LIST INDENT: #{indent.inspect}"
 
-          open_html_tag(list_tag, list_attrs)
+      start = previous_run&.paragraph_style&.indent_amount.to_i
+      if inside_li
+        start += 1
+      end
+      indent_range = (start..paragraph_style&.indent_amount.to_i)
+      puts "LIST INDENT RANGE: #{indent_range.inspect}"
+      indent_range.each_with_index do |indent_amount, index|
+        if index > 0
+          open_html_tag("li")
         end
+
+        open_html_tag(list_tag, list_attrs.merge({
+          "data-apple-notes-indent-amount" => indent_amount,
+        }))
       end
     end
 
@@ -369,6 +411,7 @@ class AttributeRun
       add_html_text(text_to_insert)
     end
 
+=begin
     puts "CLOSING X TIMES RAW: #{@html_added_tag_depth}"
     if has_style_type
       indent = paragraph_style&.indent_amount.to_i - next_run&.paragraph_style&.indent_amount.to_i
@@ -393,6 +436,7 @@ class AttributeRun
         @html_added_tag_depth += indent
       end
     end
+=end
 
     puts "CLOSING X TIMES: #{@html_added_tag_depth}"
     @html_added_tag_depth.times do

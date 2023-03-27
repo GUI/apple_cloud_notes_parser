@@ -621,10 +621,11 @@ class AppleNote < AppleCloudKitRecord
       if note_part.attachment_info
 
         if embedded_objects[embedded_object_index]
-          # puts embedded_objects[embedded_object_index].class.name.inspect
-          # doc << embedded_objects[embedded_object_index].generate_html
+          puts embedded_objects[embedded_object_index].class.name.inspect
+          puts embedded_objects[embedded_object_index].generate_html.inspect
+          node << embedded_objects[embedded_object_index].generate_html
         else
-          doc << "[Object missing, this is common for deleted notes]"
+          node << "[Object missing, this is common for deleted notes]"
         end
         embedded_object_index += 1
         current_index += note_part.length
