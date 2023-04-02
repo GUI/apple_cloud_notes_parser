@@ -1,9 +1,8 @@
 require 'cgi'
 require 'keyed_archive'
 require 'sqlite3'
-require "nokogiri"
+require 'nokogiri'
 require 'zlib'
-require "ox"
 require_relative 'ProtoPatches.rb'
 require_relative 'AppleCloudKitRecord.rb'
 require_relative 'AppleNotesEmbeddedObject.rb'
@@ -26,7 +25,6 @@ require_relative 'AppleNotesEmbeddedPublicVideo.rb'
 require_relative 'AppleNotesEmbeddedTable.rb'
 require_relative 'AppleNoteStore.rb'
 require_relative 'AppleUniformTypeIdentifier.rb'
-require "nokogiri-pretty"
 
 $xsl = Nokogiri::XSLT(File.open("indent.xsl"))
 
@@ -392,63 +390,64 @@ class AppleNote < AppleCloudKitRecord
     return @html if @html
 
     builder = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
-      doc.html {
-        doc.body {
-          doc.h1 {
-            doc.a(id: "note_#{@note_id}") {
-              doc.text "Note #{@note_id}#{" (📌)" if @is_pinned}"
-            }
+      doc.div {
+        doc.h1 {
+          doc.a(id: "note_#{@note_id}") {
+            doc.text "Note #{@note_id}#{" (📌)" if @is_pinned}"
+          }
+        }
+
+        doc.div {
+          doc.b {
+            doc.text "Account:"
           }
 
-          doc.div {
-            doc.b {
-              doc.text "Account:"
-            }
+          doc.text " "
+          doc.text @account.name
+        }
 
-            doc.text " "
-            doc.text @account.name
+        doc.div {
+          doc.b {
+            doc.text "Folder:"
           }
 
-          doc.div {
-            doc.b {
-              doc.text "Folder:"
-            }
-
-            doc.text " "
-            doc.a(href: "#folder_#{@folder.primary_key}") {
-              doc.text @folder.name
-            }
+          doc.text " "
+          doc.a(href: "#folder_#{@folder.primary_key}") {
+            doc.text @folder.name
           }
+        }
 
-          doc.div(class: "note-content") {
-            # Handle the text to insert, only if we have plaintext to run
-            if @plaintext
-              if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
-                doc.text plaintext
-              end
-
-              if @notestore.version > AppleNoteStore::IOS_VERSION_9
-                doc << generate_html_text
-              end
-            elsif @encrypted_data
-              doc.text "{Contents not decrypted}"
+        doc.div(class: "note-content") {
+          # Handle the text to insert, only if we have plaintext to run
+          if @plaintext
+            if @notestore.version == AppleNoteStore::IOS_LEGACY_VERSION
+              doc.text plaintext
             end
 
-          }
+            if @notestore.version > AppleNoteStore::IOS_VERSION_9
+              doc << generate_html_text
+            end
+          elsif @encrypted_data
+            doc.text "{Contents not decrypted}"
+          end
         }
       }
     end
 
-    puts builder.inspect
-    puts "FULL HTML: #{builder.doc.to_xhtml(indent: 2)}"
-    puts $xsl.apply_to(builder.doc).to_s
-    #puts "FULL HTML: #{doc.to_s}"
-    #puts "FULL HTML: #{doc.to_s.encoding.inspect}"
-    #puts $xsl.apply_to(Nokogiri::XML("<div>#{html}</div>")).to_s
-    #doc = Nokogiri::XML.fragment(html) { |config| config.strict }
+    temp = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
+      doc.html {
+        doc.head {
+          doc.meta(charset: "utf-8")
+        }
+        doc.body {
+          doc << builder.doc
+        }
+      }
+    end
+    File.write("output/testing/#{@note_id}.html", temp.doc.to_html)
+    File.write("output/testing/#{@note_id}.xhtml", $xsl.apply_to(temp.doc).to_s)
 
-    @html = builder.to_html
-    # @html = doc.to_s
+    @html = builder.doc.root
   end
 
   ##
@@ -456,10 +455,8 @@ class AppleNote < AppleCloudKitRecord
   # a Hash of AppleNotesEmbeddedObjects as +embedded_objects+. It returns a String containing 
   # appropriate HTML for the document.
   def self.htmlify_document(document_proto, embedded_objects)
-    doc = Nokogiri::XML("<div/>")
+    doc = Nokogiri::XML("<div/>", nil, "utf-8")
     node = doc.root
-    # puts "NODE: #{node.inspect}"
-    # html = ""
 
     # Tables cells will be a MergableDataProto
     root_node = document_proto
@@ -509,11 +506,9 @@ class AppleNote < AppleCloudKitRecord
       if note_part.attachment_info
 
         if embedded_objects[embedded_object_index]
-          puts embedded_objects[embedded_object_index].class.name.inspect
-          puts embedded_objects[embedded_object_index].generate_html.inspect
           node << embedded_objects[embedded_object_index].generate_html
         else
-          node << "[Object missing, this is common for deleted notes]"
+          node << Nokogiri::XML::Text.new("[Object missing, this is common for deleted notes]", node.document)
         end
         embedded_object_index += 1
         current_index += note_part.length
@@ -541,7 +536,6 @@ class AppleNote < AppleCloudKitRecord
         next_run = condensed_attribute_runs[attribute_run_index + 1] if attribute_run_index < condensed_attribute_runs.length - 1
 
         # Pull the HTML to insert
-        # doc << note_part.generate_html(slice_to_add)
         node = note_part.generate_html(slice_to_add, node)
 
         # Increment our counter to be sure we don't loop infinitely
@@ -551,7 +545,7 @@ class AppleNote < AppleCloudKitRecord
 
     end
 
-    doc.to_html
+    doc.root.children
   end
 
   ##
@@ -571,7 +565,6 @@ class AppleNote < AppleCloudKitRecord
   
     # Now using a function designed specifically for turning attribute runs into HTML from anyy source  
     html = AppleNote.htmlify_document(tmp_note_store_proto, @embedded_objects)
-    puts "HTML: #{html.inspect}"
     return html
   end
 

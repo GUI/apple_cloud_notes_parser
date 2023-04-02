@@ -328,15 +328,17 @@ class AppleNotesEmbeddedTable < AppleNotesEmbeddedObject
 
     # Create an HTML table
     builder = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
-      doc.table(style: "border:1px solid black") {
+      doc.table {
         # Loop over each row and create a new table row
         @reconstructed_table_html.each do |row|
           doc.tr {
             # Loop over each column and place the cell value into a td
             row.each do |column|
-              doc.td(style: "border:1px solid black") {
+              doc.td {
                 to_show = column
-                doc.text to_show
+                puts "COLUMN TO SHOW: #{to_show.inspect}"
+                to_show = "&nbsp;" if to_show.empty?
+                doc << to_show
               }
             end
           }

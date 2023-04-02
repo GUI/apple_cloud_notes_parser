@@ -866,10 +866,6 @@ class AppleNoteStore
               border-radius: 3px;
               padding: .5rem;
             }
-            .note-content {
-              white-space: pre-wrap;
-              overflow-wrap: break-word;
-            }
             .checklist {
               position: relative;
               list-style: none;
@@ -902,6 +898,13 @@ class AppleNoteStore
               position: absolute;
               left: 0;
             }
+            table {
+              border-collapse: collapse;
+            }
+            table td {
+              border: 1px solid black;
+              padding: 0.3em;
+            }
           EOS
         }
 
@@ -915,9 +918,9 @@ class AppleNoteStore
             doc << folder.generate_html if !folder.is_child?
           end
 
-          doc.div(class: "node-cards") {
+          doc.div(class: "note-cards") {
             @notes.each do |note_id, note|
-              doc.div(class: "node-card") {
+              doc.div(class: "note-card") {
                 doc << note.generate_html
               }
             end
@@ -926,7 +929,7 @@ class AppleNoteStore
       }
     end
 
-    @html = builder.to_html
+    @html = builder.doc
   end
 
   ##

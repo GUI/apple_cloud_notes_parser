@@ -45,7 +45,7 @@ class AppleNotesSmartFolder < AppleNotesFolder
       }
     end
 
-    return builder.doc.root
+    return builder.doc.children
   end
 
   def prepare_json

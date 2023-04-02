@@ -419,33 +419,6 @@ class AttributeRun
       add_html_text(text_to_insert)
     end
 
-=begin
-    puts "CLOSING X TIMES RAW: #{@html_added_tag_depth}"
-    if has_style_type
-      indent = paragraph_style&.indent_amount.to_i - next_run&.paragraph_style&.indent_amount.to_i
-      indent2 = previous_run&.paragraph_style&.indent_amount.to_i - next_run&.paragraph_style&.indent_amount.to_i
-      puts "CLOSING INDENT: #{indent.inspect}"
-      puts "CLOSING INDENT2: #{indent2.inspect}"
-      puts "CLOSING TAG: #{@active_html_node.node_name.inspect}"
-      if @active_html_node.node_name == "li" && indent < 0
-        @html_added_tag_depth = 0
-      elsif @active_html_node.node_name == "li" && indent >= 0
-        if indent > 0
-          @html_added_tag_depth += 1
-        end
-
-        case begin_tag_name
-        when "ol", "ul"
-          @html_added_tag_depth += 1
-        end
-      elsif !same_style_type_previous? && same_style_type_next?
-        @html_added_tag_depth -= indent
-      elsif same_style_type_previous? && !same_style_type_next?
-        @html_added_tag_depth += indent
-      end
-    end
-=end
-
     puts "CLOSING X TIMES: #{@html_added_tag_depth}"
     @html_added_tag_depth.times do
       # puts "CLOSING NODE: #{@active_html_node.inspect}"
