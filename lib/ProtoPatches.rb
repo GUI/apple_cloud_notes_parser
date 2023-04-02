@@ -361,6 +361,14 @@ class AttributeRun
       if inside_li
         start += 1
       end
+      puts "NORMAL START: #{start.inspect}"
+      start = @active_html_node.attr("data-apple-notes-indent-amount")&.to_i || @active_html_node.ancestors("[data-apple-notes-indent-amount]")&.first&.attr("data-apple-notes-indent-amount")&.to_i
+      if start
+        start += 1
+      else
+        start = 0
+      end
+      puts "HTML START: #{start.inspect}"
       indent_range = (start..paragraph_style&.indent_amount.to_i)
       puts "LIST INDENT RANGE: #{indent_range.inspect}"
       indent_range.each_with_index do |indent_amount, index|
