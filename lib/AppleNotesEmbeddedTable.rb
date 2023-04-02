@@ -328,7 +328,7 @@ class AppleNotesEmbeddedTable < AppleNotesEmbeddedObject
 
     # Create an HTML table
     builder = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
-      doc.html(style: "border:1px solid black") {
+      doc.table(style: "border:1px solid black") {
         # Loop over each row and create a new table row
         @reconstructed_table_html.each do |row|
           doc.tr {
@@ -344,7 +344,7 @@ class AppleNotesEmbeddedTable < AppleNotesEmbeddedObject
       }
     end
 
-    return builder.to_html
+    return builder.doc.root
   end
 
   ##

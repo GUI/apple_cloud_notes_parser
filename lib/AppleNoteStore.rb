@@ -855,53 +855,53 @@ class AppleNoteStore
         doc.head {
           doc.meta(charset: "utf-8")
           doc.style <<~EOS
-              .note-cards {
-                display: grid;
-                grid-template-columns: repeat(1, 1fr);
-                grid-auto-rows: auto;
-                grid-gap: 1rem;
-              }
-              .note-card {
-                border: 2px solid black;
-                border-radius: 3px;
-                padding: .5rem;
-              }
-              .note-content {
-                white-space: pre-wrap;
-                overflow-wrap: break-word;
-              }
-              .checklist {
-                position: relative;
-                list-style: none;
-                margin-left: 0;
-                padding-left: 1.2em;
-              }
-              .checklist li.checked:before {
-                content: '☑';
-                position: absolute;
-                left: 0;
-              }
-              .checklist li.unchecked:before {
-                content: '☐';
-                position: absolute;
-                left: 0;
-              }
-              .folder_list {
-                position: relative;
-                list-style: none;
-                margin-left: 0;
-                padding-left: 1.2em;
-              }
-              .folder_list li.folder:before {
-                content: '📁';
-                position: absolute;
-                left: 0;
-              }
-              .folder_list li.note:before {
-                content: '📄';
-                position: absolute;
-                left: 0;
-              }
+            .note-cards {
+              display: grid;
+              grid-template-columns: repeat(1, 1fr);
+              grid-auto-rows: auto;
+              grid-gap: 1rem;
+            }
+            .note-card {
+              border: 2px solid black;
+              border-radius: 3px;
+              padding: .5rem;
+            }
+            .note-content {
+              white-space: pre-wrap;
+              overflow-wrap: break-word;
+            }
+            .checklist {
+              position: relative;
+              list-style: none;
+              margin-left: 0;
+              padding-left: 1.2em;
+            }
+            .checklist li.checked:before {
+              content: '☑';
+              position: absolute;
+              left: 0;
+            }
+            .checklist li.unchecked:before {
+              content: '☐';
+              position: absolute;
+              left: 0;
+            }
+            .folder_list {
+              position: relative;
+              list-style: none;
+              margin-left: 0;
+              padding-left: 1.2em;
+            }
+            .folder_list li.folder:before {
+              content: '📁';
+              position: absolute;
+              left: 0;
+            }
+            .folder_list li.note:before {
+              content: '📄';
+              position: absolute;
+              left: 0;
+            }
           EOS
         }
 
