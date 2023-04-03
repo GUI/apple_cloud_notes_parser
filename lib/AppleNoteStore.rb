@@ -860,6 +860,9 @@ class AppleNoteStore
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
               font-size: 13px;
             }
+            h1, h2, h3 {
+              margin: 0px;
+            }
             .note-cards {
               display: grid;
               grid-template-columns: repeat(1, 1fr);
@@ -870,6 +873,15 @@ class AppleNoteStore
               border: 2px solid black;
               border-radius: 3px;
               padding: .5rem;
+            }
+            ul, ol {
+              margin: 0px;
+            }
+            ul.none {
+              list-style-type: none;
+            }
+            ul.dashed {
+              list-style-type: '- ';
             }
             .checklist {
               position: relative;

@@ -16,15 +16,15 @@ end
 
 class Color
   def red_hex_string
-    (red * 255).round().to_s(16).upcase
+    (red * 255).round().to_s(16).upcase.rjust(2, "0")
   end
 
   def green_hex_string
-    (green * 255).round().to_s(16).upcase
+    (green * 255).round().to_s(16).upcase.rjust(2, "0")
   end
 
   def blue_hex_string
-    (blue * 255).round().to_s(16).upcase
+    (blue * 255).round().to_s(16).upcase.rjust(2, "0")
   end
 
   def full_hex_string
@@ -168,30 +168,23 @@ class AttributeRun
     return to_return
   end
 
-  def open_html_tag(tag_name, attributes = {}, track_depth: true)
+  def open_html_tag(tag_name, attributes = {})
     tag = Nokogiri::XML::Node.new(tag_name, @active_html_node.document)
     attributes.each do |key, value|
       tag[key] = value
     end
 
     @active_html_node = @active_html_node.add_child(tag)
-
-    if track_depth
-      @html_added_tag_depth += 1
-    end
   end
 
-  def close_html_tag(track_depth: true)
+  def close_html_tag
     unless @active_html_node.parent.nil?
       @active_html_node = @active_html_node.parent
-      if track_depth
-        @html_added_tag_depth -= 1
-      end
     end
   end
 
-  def add_inline_html(text_to_insert)
-    begin_html_added_tag_depth = @html_added_tag_depth
+  def add_text_style_html(text_to_insert)
+    original_active_html_node = @active_html_node
 
     # Deal with the font
     if font_weight
@@ -232,26 +225,13 @@ class AttributeRun
       open_html_tag("sub")
     end
 
-    style_attrs = {}
-    case paragraph_style&.alignment
-    when AppleNote::STYLE_ALIGNMENT_CENTER
-      style_attrs["text-align"] = "center"
-    when AppleNote::STYLE_ALIGNMENT_RIGHT
-      style_attrs["text-align"] = "right"
-    when AppleNote::STYLE_ALIGNMENT_JUSTIFY
-      style_attrs["text-align"] = "justify"
-    end
-    if style_attrs.any?
-      open_html_tag("div", { style: style_attrs.map { |k, v| "#{k}: #{v}" }.join("; ") })
-    end
-
     # Handle fonts and colors
     style_attrs = {}
     if font
       if font.font_name
         style_attrs["font-family"] = "'#{font.font_name.gsub("'", "\\\\'")}'"
       end
-      if font.point_size
+      if font.point_size && font.point_size != 0
         style_attrs["font-size"] = "#{font.point_size}px"
       end
     end
@@ -268,42 +248,59 @@ class AttributeRun
 
     @active_html_node.add_child(Nokogiri::XML::Text.new(text_to_insert, @active_html_node.document))
 
-    (@html_added_tag_depth - begin_html_added_tag_depth).times do
-      close_html_tag
-    end
+    @active_html_node = original_active_html_node
   end
 
   def add_html_text(text_to_insert)
-    text_to_insert.split(/(\u2028|\n)/).each_with_index do |line, i|
+    parts = text_to_insert.split(/(\u2028|\n)/)
+    parts.each_with_index do |line, index|
       case line
+      # New lines in headers or check lists.
       when "\u2028"
         @active_html_node.add_child(Nokogiri::XML::Node.new("br", @active_html_node.document))
+
+      # Normal new lines
       when "\n"
-        puts "NEW LINE NODE: #{@active_html_node.node_name.inspect}"
-        case @active_html_node.node_name
-        when "pre"
-          add_inline_html("\n")
-        when "h1", "h2", "h3"
-          # Do nothing
-        else
+        node_name = @active_html_node.node_name
+
+        # Always add a normal new line if inside a <pre> tag.
+        if node_name == "pre" || @active_html_node.ancestors("pre").any?
+          @active_html_node.add_child(Nokogiri::XML::Text.new("\n", @active_html_node.document))
+
+        # Add <br> tags for new lines as long as it's *not* the last character
+        # and we're inside a block level element (since these provide a new
+        # line already).
+        elsif index < parts.length - 1 || (node_name != "h1" && node_name != "h2" && node_name != "h3" && node_name != "div" && @active_html_node.ancestors("h1, h2, h3, div").empty?)
           @active_html_node.add_child(Nokogiri::XML::Node.new("br", @active_html_node.document))
         end
       else
-        add_inline_html(line)
+        add_text_style_html(line)
       end
     end
   end
 
   ##
   # This method generates the HTML for a given AttributeRun. It expects a String as +text_to_insert+
-  def generate_html(text_to_insert, fragment)
+  def generate_html(text_to_insert, root_node)
     puts "GENERATE HTML TEXT: #{text_to_insert.inspect}"
     puts "GENERATE HTML SELF: #{self.inspect}"
-    puts "GENERATE HTML NODE: #{fragment.node_name.inspect}"
-    @active_html_node = fragment
-    @html_added_tag_depth = 0
+    puts "GENERATE HTML NODE: #{root_node.node_name.inspect}"
+    @active_html_node = root_node
     @tag_is_open = !text_to_insert.end_with?("\n")
     begin_tag_name = @active_html_node.node_name
+
+    style_attrs = {}
+    case paragraph_style&.alignment
+    when AppleNote::STYLE_ALIGNMENT_CENTER
+      style_attrs["text-align"] = "center"
+    when AppleNote::STYLE_ALIGNMENT_RIGHT
+      style_attrs["text-align"] = "right"
+    when AppleNote::STYLE_ALIGNMENT_JUSTIFY
+      style_attrs["text-align"] = "justify"
+    end
+    if style_attrs.any?
+      open_html_tag("div", { style: style_attrs.map { |k, v| "#{k}: #{v}" }.join("; ") })
+    end
 
     if has_style_type and !same_style_type_previous?
       case paragraph_style.style_type
@@ -353,11 +350,11 @@ class AttributeRun
         if paragraph_style&.indent_amount.to_i > previous_run&.paragraph_style&.indent_amount.to_i || (paragraph_style&.indent_amount.to_i == previous_run&.paragraph_style&.indent_amount.to_i && previous_run&.tag_is_open)
           puts "FINDING LAST LI"
           inside_li = true
-          @active_html_node = fragment.last_element_child.css("li").last || fragment
+          @active_html_node = root_node.last_element_child.css("li").last || root_node
         elsif depth >= 0
           puts "FINDING LAST UL"
           amount = paragraph_style&.indent_amount.to_i
-          @active_html_node = fragment.last_element_child.at_xpath(".//*[@data-apple-notes-indent-amount=#{amount}]", "self::node()[@data-apple-notes-indent-amount=#{amount}]") || fragment
+          @active_html_node = root_node.last_element_child.at_xpath(".//*[@data-apple-notes-indent-amount=#{amount}]", "self::node()[@data-apple-notes-indent-amount=#{amount}]") || root_node
           puts "FINDING LAST UL: #{@active_html_node.last_element_child.inspect}"
           puts "FINDING LAST UL: #{paragraph_style&.indent_amount.inspect}"
           puts "FINDING LAST UL: #{@active_html_node.last_element_child.css("[data-apple-notes-indent-amount=#{paragraph_style&.indent_amount.to_i}]").inspect}"
@@ -421,12 +418,10 @@ class AttributeRun
       list_items.each_with_index do |list_item_text, index|
         if list_item_text == "\n"
           if index != list_items.length - 1
-            # close_html_tag(track_depth: false)
             close_html_tag
           end
         else
           if @active_html_node.node_name != "li"
-            # open_html_tag("li", li_attrs, track_depth: false)
             open_html_tag("li", li_attrs)
           end
 
@@ -437,18 +432,7 @@ class AttributeRun
       add_html_text(text_to_insert)
     end
 
-=begin
-    puts "CLOSING X TIMES: #{@html_added_tag_depth}"
-    @html_added_tag_depth.times do
-      # puts "CLOSING NODE: #{@active_html_node.inspect}"
-      # puts "CLOSING NODE.PARENT: #{@active_html_node.parent.inspect}"
-      puts "CLOSING X BEFORE: #{@active_html_node.node_name.inspect}"
-      close_html_tag
-      puts "CLOSING X AFTER: #{@active_html_node.node_name.inspect}"
-    end
-=end
-
-    return fragment
+    return root_node
   end
 end
 
