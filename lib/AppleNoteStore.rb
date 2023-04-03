@@ -850,11 +850,16 @@ class AppleNoteStore
     # Bail early if we can
     return @html if @html
 
-    builder = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
+    document = Nokogiri::HTML5::Document.new
+    builder = Nokogiri::HTML::Builder.new({ encoding: "utf-8" }, document) do |doc|
       doc.html {
         doc.head {
           doc.meta(charset: "utf-8")
           doc.style <<~EOS
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+              font-size: 13px;
+            }
             .note-cards {
               display: grid;
               grid-template-columns: repeat(1, 1fr);

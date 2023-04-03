@@ -45,6 +45,11 @@ class AppleNote < AppleCloudKitRecord
   STYLE_TYPE_NUMBERED_LIST = 102
   STYLE_TYPE_CHECKBOX = 103
 
+  STYLE_ALIGNMENT_LEFT = 0
+  STYLE_ALIGNMENT_CENTER = 1
+  STYLE_ALIGNMENT_RIGHT = 2
+  STYLE_ALIGNMENT_JUSTIFY = 3
+
   # Constants that reflect the types of font weighting
   FONT_TYPE_DEFAULT = 0
   FONT_TYPE_BOLD = 1
@@ -455,8 +460,8 @@ class AppleNote < AppleCloudKitRecord
   # a Hash of AppleNotesEmbeddedObjects as +embedded_objects+. It returns a String containing 
   # appropriate HTML for the document.
   def self.htmlify_document(document_proto, embedded_objects)
-    doc = Nokogiri::XML("<div/>", nil, "utf-8")
-    node = doc.root
+    doc = Nokogiri::HTML5::Document.parse("", nil, "utf-8")
+    node = doc.at_css("body")
 
     # Tables cells will be a MergableDataProto
     root_node = document_proto
@@ -536,7 +541,7 @@ class AppleNote < AppleCloudKitRecord
         next_run = condensed_attribute_runs[attribute_run_index + 1] if attribute_run_index < condensed_attribute_runs.length - 1
 
         # Pull the HTML to insert
-        node = note_part.generate_html(slice_to_add, node)
+        note_part.generate_html(slice_to_add, node)
 
         # Increment our counter to be sure we don't loop infinitely
         current_index += (note_part.length - double_characters)
@@ -545,7 +550,7 @@ class AppleNote < AppleCloudKitRecord
 
     end
 
-    doc.root.children
+    doc
   end
 
   ##

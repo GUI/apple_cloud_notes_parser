@@ -335,10 +335,7 @@ class AppleNotesEmbeddedTable < AppleNotesEmbeddedObject
             # Loop over each column and place the cell value into a td
             row.each do |column|
               doc.td {
-                to_show = column
-                puts "COLUMN TO SHOW: #{to_show.inspect}"
-                to_show = "&nbsp;" if to_show.empty?
-                doc << to_show
+                doc << column
               }
             end
           }
