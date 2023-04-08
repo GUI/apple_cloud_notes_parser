@@ -54,9 +54,6 @@ class AttributeRun
 
     no_attachment_info = !attachment_info # We don't want to get so greedy with attachments
 
-    # puts "SAME LINK: #{same_link.inspect}"
-    # puts "SAME LINK: #{link.inspect}"
-    # puts "SAME LINK: #{other_attribute_run.link.inspect}"
     return (same_paragraph and same_font and same_font_weight and same_underlined and same_strikethrough and same_superscript and same_link and same_color and same_attachment_info and no_attachment_info)
   end
 
@@ -267,10 +264,8 @@ class AttributeRun
         if node_name == "pre" || @active_html_node.ancestors("pre").any?
           @active_html_node.add_child(Nokogiri::XML::Text.new("\n", @active_html_node.document))
 
-        # Add <br> tags for new lines as long as it's *not* the last character
-        # and we're inside a block level element (since these provide a new
-        # line already).
-        elsif index < parts.length - 1 || (node_name != "h1" && node_name != "h2" && node_name != "h3" && node_name != "div" && @active_html_node.ancestors("h1, h2, h3, div").empty?)
+        # Add <br> tags for any other new line.
+        else
           @active_html_node.add_child(Nokogiri::XML::Node.new("br", @active_html_node.document))
         end
       else
@@ -279,16 +274,8 @@ class AttributeRun
     end
   end
 
-  ##
-  # This method generates the HTML for a given AttributeRun. It expects a String as +text_to_insert+
-  def generate_html(text_to_insert, root_node)
-    puts "GENERATE HTML TEXT: #{text_to_insert.inspect}"
-    puts "GENERATE HTML SELF: #{self.inspect}"
-    puts "GENERATE HTML NODE: #{root_node.node_name.inspect}"
-    @active_html_node = root_node
-    @tag_is_open = !text_to_insert.end_with?("\n")
-    begin_tag_name = @active_html_node.node_name
-
+  def open_alignment_tag
+    # Open a new div if the text alignment is not the default.
     style_attrs = {}
     case paragraph_style&.alignment
     when AppleNote::STYLE_ALIGNMENT_CENTER
@@ -298,10 +285,15 @@ class AttributeRun
     when AppleNote::STYLE_ALIGNMENT_JUSTIFY
       style_attrs["text-align"] = "justify"
     end
+
     if style_attrs.any?
       open_html_tag("div", { style: style_attrs.map { |k, v| "#{k}: #{v}" }.join("; ") })
     end
+  end
 
+  def open_block_tag
+    # Open a new block-level tag if the current attribute run is of a different
+    # type than the previous.
     if has_style_type and !same_style_type_previous?
       case paragraph_style.style_type
       when AppleNote::STYLE_TYPE_TITLE
@@ -314,120 +306,130 @@ class AttributeRun
         open_html_tag("pre")
       end
     end
+  end
 
+  def open_indent_tag
+    tag_name = nil
+    tag_attrs = {}
+
+    # Determine which tag to open for indenting the list or block.
     case paragraph_style&.style_type
     when AppleNote::STYLE_TYPE_NUMBERED_LIST
-      list_tag = "ol"
-      list_attrs = {}
+      tag_name = "ol"
     when AppleNote::STYLE_TYPE_DOTTED_LIST
-      list_tag = "ul"
-      list_attrs = { class: "dotted" }
+      tag_name = "ul"
+      tag_attrs = { class: "dotted" }
     when AppleNote::STYLE_TYPE_DASHED_LIST
-      list_tag = "ul"
-      list_attrs = { class: "dashed" }
+      tag_name = "ul"
+      tag_attrs = { class: "dashed" }
     when AppleNote::STYLE_TYPE_CHECKBOX
-      list_tag = "ul"
-      list_attrs = { class: "checklist" }
+      tag_name = "ul"
+      tag_attrs = { class: "checklist" }
     else
-      if paragraph_style&.indent_amount.to_i > 0
-        list_tag = "ul"
-        list_attrs = { class: "none" }
+      # If the text isn't a list, but is still marked as indented, then use a
+      # <blockquote> tag to perform the indenting. The exception is if the text
+      # is monospaced, in which case, there are explicit space characters that
+      # provide the indentation.
+      if paragraph_style&.indent_amount.to_i > 0 && @active_html_node.node_name != "pre"
+        tag_name = "blockquote"
       end
     end
 
-    if list_tag
-      depth = paragraph_style&.indent_amount.to_i
-      unless is_any_list?
-        depth -= 1
-      end
-      puts "DEPTH: #{depth.inspect}"
+    # Open up the indentation tag if we've determined one is necessary.
+    if tag_name
+      indent_amount = paragraph_style&.indent_amount.to_i
+      previous_indent_amount = previous_run&.paragraph_style&.indent_amount.to_i
 
-      inside_li = false
-      if paragraph_style&.style_type != previous_run&.paragraph_style&.style_type && paragraph_style&.indent_amount.to_i == 0
-        puts "USING ROOT-diff"
-        # @active_html_node = @active_html_node.ancestors.last || @active_html_node
-      elsif previous_run&.is_any_list? || previous_run&.paragraph_style&.indent_amount.to_i > 0
-        if paragraph_style&.indent_amount.to_i > previous_run&.paragraph_style&.indent_amount.to_i || (paragraph_style&.indent_amount.to_i == previous_run&.paragraph_style&.indent_amount.to_i && previous_run&.tag_is_open)
-          puts "FINDING LAST LI"
-          inside_li = true
-          @active_html_node = root_node.last_element_child.css("li").last || root_node
-        elsif depth >= 0
-          puts "FINDING LAST UL"
-          amount = paragraph_style&.indent_amount.to_i
-          @active_html_node = root_node.last_element_child.at_xpath(".//*[@data-apple-notes-indent-amount=#{amount}]", "self::node()[@data-apple-notes-indent-amount=#{amount}]") || root_node
-          puts "FINDING LAST UL: #{@active_html_node.last_element_child.inspect}"
-          puts "FINDING LAST UL: #{paragraph_style&.indent_amount.inspect}"
-          puts "FINDING LAST UL: #{@active_html_node.last_element_child.css("[data-apple-notes-indent-amount=#{paragraph_style&.indent_amount.to_i}]").inspect}"
-          puts "FINDING LAST UL: #{@active_html_node.inspect}"
+      # If this is the same style as the previous indent, or if the indentation
+      # is nested more deeply, then we need to look for the previous list
+      # that's already present in the HTML that we should possibly continue.
+      if paragraph_style&.style_type == previous_run&.paragraph_style&.style_type || indent_amount > 0
+        # If the indent level needs to go deeper than the previous run, or the
+        # previous list tag was never closed, then find the existing list tag
+        # to nest things inside of. Otherwise, look for an existing tag at the
+        # same level to continue.
+        if indent_amount > previous_indent_amount || (indent_amount == previous_indent_amount && previous_run&.tag_is_open)
+          child_tag_name = "li"
+          if tag_name == "blockquote"
+            child_tag_name = "blockquote"
+          end
+
+          # Look for the last, inner-most list tag to continue.
+          @active_html_node = @active_html_node.last_element_child&.at_xpath("(.//#{child_tag_name}[not(.//#{child_tag_name})])[last()]", "(self::node()[self::#{child_tag_name}])") || @active_html_node
+        else
+          # Look for the last list container tag at the same indent level.
+          @active_html_node = @active_html_node.last_element_child&.at_xpath("(.//*[@data-apple-notes-indent-amount=#{indent_amount}])[last()]", "self::node()[@data-apple-notes-indent-amount=#{indent_amount}]") || @active_html_node
         end
-      else
-        puts "USING ROOT"
       end
-      puts "GENERATE HTML ACTIVE NODE: #{@active_html_node.node_name.inspect}"
 
-      indent = paragraph_style&.indent_amount.to_i - previous_run&.paragraph_style&.indent_amount.to_i + 1
-      puts "LIST INDENT RAW: #{indent.inspect}"
-      if indent <= 0 && (!previous_run&.is_any_list? || paragraph_style&.style_type != previous_run&.paragraph_style&.style_type)
-        indent = 1
-      end
-      puts "LIST INDENT: #{indent.inspect}"
-
-      start = previous_run&.paragraph_style&.indent_amount.to_i
-      if inside_li
-        start += 1
-      end
-      puts "NORMAL START: #{start.inspect}"
-      start = @active_html_node.attr("data-apple-notes-indent-amount")&.to_i || @active_html_node.ancestors("[data-apple-notes-indent-amount]")&.first&.attr("data-apple-notes-indent-amount")&.to_i
-      if start
-        start += 1
+      # Determine what the current list indent level is for any opened tags we
+      # are nested inside of, and then determine how many new indent levels
+      # need to be opened to reach our target indent amount.
+      current_indent_amount = @active_html_node.attr("data-apple-notes-indent-amount")&.to_i || @active_html_node.ancestors("[data-apple-notes-indent-amount]")&.first&.attr("data-apple-notes-indent-amount")&.to_i
+      if current_indent_amount
+        indent_range = (current_indent_amount + 1)..indent_amount
+      elsif tag_name == "blockquote"
+        indent_range = 1..indent_amount
       else
-        start = 0
+        indent_range = 0..indent_amount
       end
-      puts "HTML START: #{start.inspect}"
-      indent_range = (start..paragraph_style&.indent_amount.to_i)
-      puts "LIST INDENT RANGE: #{indent_range.inspect}"
+
+      # For each indent level that's missing, open up new tags for each level.
       indent_range.each_with_index do |indent_amount, index|
-        if index > 0
-          open_html_tag("li")
+        level_tag_attrs = tag_attrs.merge({
+          "data-apple-notes-indent-amount" => indent_amount,
+        })
+
+        if tag_name != "blockquote"
+          if index > 0
+            open_html_tag("li")
+          end
+
+          if indent_amount != indent_range.last
+            level_tag_attrs[:class] = "none"
+          end
         end
 
-        open_html_tag(list_tag, list_attrs.merge({
-          "data-apple-notes-indent-amount" => indent_amount,
-        }))
+        open_html_tag(tag_name, level_tag_attrs)
       end
     end
+  end
 
-    # puts text_to_insert.inspect
-    # puts "LINK: #{link.inspect}"
-    # puts "LINK has_style_type: #{has_style_type.inspect}"
-    # puts "LINK same_style_type_previous?: #{same_style_type_previous?.inspect}"
-    # puts "ATTRIBUTE RUN: #{self.inspect}"
-    # puts @active_html_node.inspect
+  def add_list_text(text_to_insert)
+    li_attrs = {}
+    if is_checkbox?
+      li_attrs["class"] = (paragraph_style.checklist.done == 1) ? "checked" : "unchecked"
+    end
+
+    list_items = text_to_insert.split(/(\n)/)
+    list_items.each_with_index do |list_item_text, index|
+      if list_item_text == "\n"
+        if index != list_items.length - 1
+          close_html_tag
+        end
+      else
+        if @active_html_node.node_name != "li"
+          open_html_tag("li", li_attrs)
+        end
+
+        add_html_text(list_item_text)
+      end
+    end
+  end
+
+  ##
+  # This method generates the HTML for a given AttributeRun. It expects a String as +text_to_insert+
+  def generate_html(text_to_insert, root_node)
+    @active_html_node = root_node
+    @tag_is_open = !text_to_insert.end_with?("\n")
+
+    open_alignment_tag
+    open_block_tag
+    open_indent_tag
 
     case @active_html_node.node_name
     when "ol", "ul", "li"
-      li_attrs = {}
-      if is_checkbox?
-        li_attrs["class"] = (paragraph_style.checklist.done == 1) ? "checked" : "unchecked"
-      end
-
-      # puts "LIST TEXT TO INSERT: #{text_to_insert.inspect}"
-      # puts "LIST TEXT TO INSERT node type: #{@active_html_node.node_name.inspect}"
-      puts "LIST NODE: #{@active_html_node.node_name.inspect}"
-      list_items = text_to_insert.split(/(\n)/)
-      list_items.each_with_index do |list_item_text, index|
-        if list_item_text == "\n"
-          if index != list_items.length - 1
-            close_html_tag
-          end
-        else
-          if @active_html_node.node_name != "li"
-            open_html_tag("li", li_attrs)
-          end
-
-          add_html_text(list_item_text)
-        end
-      end
+      add_list_text(text_to_insert)
     else
       add_html_text(text_to_insert)
     end

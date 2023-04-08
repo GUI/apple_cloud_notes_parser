@@ -443,6 +443,78 @@ class AppleNote < AppleCloudKitRecord
       doc.html {
         doc.head {
           doc.meta(charset: "utf-8")
+          doc.style <<~EOS
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+              font-size: 13px;
+            }
+            h1, h2, h3 {
+              margin: 0px;
+            }
+            .note-cards {
+              display: grid;
+              grid-template-columns: repeat(1, 1fr);
+              grid-auto-rows: auto;
+              grid-gap: 1rem;
+            }
+            .note-card {
+              border: 2px solid black;
+              border-radius: 3px;
+              padding: .5rem;
+            }
+            pre {
+              margin: 0px;
+            }
+            ul, ol, blockquote {
+              padding: 0px 0px 0px 2rem;
+              margin: 0px;
+            }
+            ul.none, ol.none {
+              list-style-type: none;
+            }
+            ul.dashed {
+              list-style-type: '- ';
+            }
+            .checklist {
+              position: relative;
+              list-style: none;
+              margin-left: 0;
+              padding-left: 1.2em;
+            }
+            .checklist li.checked:before {
+              content: '☑';
+              position: absolute;
+              left: 0;
+            }
+            .checklist li.unchecked:before {
+              content: '☐';
+              position: absolute;
+              left: 0;
+            }
+            .folder_list {
+              position: relative;
+              list-style: none;
+              margin-left: 0;
+              padding-left: 1.2em;
+            }
+            .folder_list li.folder:before {
+              content: '📁';
+              position: absolute;
+              left: 0;
+            }
+            .folder_list li.note:before {
+              content: '📄';
+              position: absolute;
+              left: 0;
+            }
+            table {
+              border-collapse: collapse;
+            }
+            table td {
+              border: 1px solid black;
+              padding: 0.3em;
+            }
+          EOS
         }
         doc.body {
           doc << builder.doc

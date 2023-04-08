@@ -874,10 +874,14 @@ class AppleNoteStore
               border-radius: 3px;
               padding: .5rem;
             }
-            ul, ol {
+            pre {
               margin: 0px;
             }
-            ul.none {
+            ul, ol, blockquote {
+              padding: 0px 0px 0px 2rem;
+              margin: 0px;
+            }
+            ul.none, ol.none {
               list-style-type: none;
             }
             ul.dashed {
