@@ -26,8 +26,6 @@ require_relative 'AppleNotesEmbeddedTable.rb'
 require_relative 'AppleNoteStore.rb'
 require_relative 'AppleUniformTypeIdentifier.rb'
 
-$xsl = Nokogiri::XSLT(File.open("indent.xsl"))
-
 ##
 #
 # This class represents an Apple Note.
@@ -422,6 +420,77 @@ class AppleNote < AppleCloudKitRecord
           }
         }
 
+        doc.div {
+          doc.b {
+            doc.text "Title:"
+          }
+
+          doc.text " "
+          doc.text @title
+        }
+
+        doc.div {
+          doc.b {
+            doc.text "Created:"
+          }
+
+          doc.text " "
+          doc.text @creation_time
+        }
+
+        doc.div {
+          doc.b {
+            doc.text "Modified:"
+          }
+
+          doc.text " "
+          doc.text @modify_time
+        }
+
+        if cloud_kit_record_known?(@cloudkit_creator_record_id, @notestore.cloud_kit_participants)
+          doc.div {
+            doc.b {
+              doc.text "CloudKit Creator:"
+            }
+
+            doc.text " "
+            doc.text @notestore.cloud_kit_participants[@cloudkit_creator_record_id].email
+          }
+        end
+
+        if cloud_kit_record_known?(@cloudkit_modifier_record_id, @notestore.cloud_kit_participants)
+          doc.div {
+            doc.b {
+              doc.text "CloudKit Last Modified User:"
+            }
+
+            doc.text " "
+            doc.text @notestore.cloud_kit_participants[@cloudkit_modifier_record_id].email
+          }
+        end
+
+        if @cloudkit_last_modified_device
+          doc.div {
+            doc.b {
+              doc.text "CloudKit Last Modified Device:"
+            }
+
+            doc.text " "
+            doc.text @cloudkit_last_modified_device
+          }
+        end
+
+        if self.has_tags
+          doc.div {
+            doc.b {
+              doc.text "Tags:"
+            }
+
+            doc.text " "
+            doc.text self.get_all_tags.join(", ")
+          }
+        end
+
         doc.div(class: "note-content") {
           # Handle the text to insert, only if we have plaintext to run
           if @plaintext
@@ -438,91 +507,6 @@ class AppleNote < AppleCloudKitRecord
         }
       }
     end
-
-    temp = Nokogiri::HTML::Builder.new(encoding: "utf-8") do |doc|
-      doc.html {
-        doc.head {
-          doc.meta(charset: "utf-8")
-          doc.style <<~EOS
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-              font-size: 13px;
-            }
-            h1, h2, h3 {
-              margin: 0px;
-            }
-            .note-cards {
-              display: grid;
-              grid-template-columns: repeat(1, 1fr);
-              grid-auto-rows: auto;
-              grid-gap: 1rem;
-            }
-            .note-card {
-              border: 2px solid black;
-              border-radius: 3px;
-              padding: .5rem;
-            }
-            pre {
-              margin: 0px;
-            }
-            ul, ol, blockquote {
-              padding: 0px 0px 0px 2rem;
-              margin: 0px;
-            }
-            ul.none, ol.none {
-              list-style-type: none;
-            }
-            ul.dashed {
-              list-style-type: '- ';
-            }
-            .checklist {
-              position: relative;
-              list-style: none;
-              margin-left: 0;
-              padding-left: 1.2em;
-            }
-            .checklist li.checked:before {
-              content: '☑';
-              position: absolute;
-              left: 0;
-            }
-            .checklist li.unchecked:before {
-              content: '☐';
-              position: absolute;
-              left: 0;
-            }
-            .folder_list {
-              position: relative;
-              list-style: none;
-              margin-left: 0;
-              padding-left: 1.2em;
-            }
-            .folder_list li.folder:before {
-              content: '📁';
-              position: absolute;
-              left: 0;
-            }
-            .folder_list li.note:before {
-              content: '📄';
-              position: absolute;
-              left: 0;
-            }
-            table {
-              border-collapse: collapse;
-            }
-            table td {
-              border: 1px solid black;
-              padding: 0.3em;
-            }
-          EOS
-        }
-        doc.body {
-          doc << builder.doc
-        }
-      }
-    end
-    File.write("output/testing/#{@note_id}.html", temp.doc.to_html)
-    File.write("output/testing/#{@note_id}.xhtml", $xsl.apply_to(temp.doc).to_s)
 
     @html = builder.doc.root
   end

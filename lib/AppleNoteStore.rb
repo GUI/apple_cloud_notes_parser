@@ -874,6 +874,9 @@ class AppleNoteStore
               border-radius: 3px;
               padding: .5rem;
             }
+            .note-content {
+              margin-top: 1rem;
+            }
             pre {
               margin: 0px;
             }

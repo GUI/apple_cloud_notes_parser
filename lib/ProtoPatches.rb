@@ -1,4 +1,3 @@
-require 'json'
 require_relative 'notestore_pb.rb'
 
 # A little monkey patching never hurt anyone
@@ -36,8 +35,8 @@ class AttributeRun
 
   attr_accessor :previous_run, :next_run, :tag_is_open
 
-  def has_style_type(style = paragraph_style)
-    style and style.style_type
+  def has_style_type
+    paragraph_style and paragraph_style.style_type
   end
 
   def same_style?(other_attribute_run)
@@ -61,7 +60,6 @@ class AttributeRun
   # This method checks if the previous AttributeRun had the same style_type
   def same_style_type_previous?
     same_style_type?(previous_run)
-    # same_style_type?(previous_run) && previous_run.paragraph_style.indent_amount == paragraph_style.indent_amount
   end
 
   ##
@@ -83,13 +81,15 @@ class AttributeRun
     # If neither has a style type, that is the same
     return true if (!other_attribute_run.has_style_type and !has_style_type)
 
+    # If the indent levels are different, then the styles are different.
     return false if (other_attribute_run.paragraph_style.indent_amount != paragraph_style.indent_amount)
 
+    # If both are checkboxes, but they belong to different checklist UUIDs,
+    # then the styles are different.
     return false if (is_checkbox? && other_attribute_run.is_checkbox? && other_attribute_run.paragraph_style.checklist.uuid != paragraph_style.checklist.uuid)
 
     # Compare our style_type to the other style_type and return the result
-    return (other_attribute_run.paragraph_style.style_type == paragraph_style.style_type)
-    # return (other_attribute_run.paragraph_style.style_type == paragraph_style.style_type && other_attribute_run.paragraph_style.indent_amount == paragraph_style.indent_amount)
+    return (other_attribute_run.paragraph_style.style_type == paragraph_style.style_type)  
   end
 
   ##
@@ -113,32 +113,32 @@ class AttributeRun
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_CHECKBOX.
-  def is_checkbox?(style = paragraph_style)
-    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_CHECKBOX)
+  def is_checkbox?
+    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_CHECKBOX)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_NUMBERED_LIST.
-  def is_numbered_list?(style = paragraph_style)
-    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_NUMBERED_LIST)
+  def is_numbered_list?
+    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_NUMBERED_LIST)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_DOTTED_LIST.
-  def is_dotted_list?(style = paragraph_style)
-    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_DOTTED_LIST)
+  def is_dotted_list?
+    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_DOTTED_LIST)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is an AppleNote::STYLE_TYPE_DASHED_LIST.
-  def is_dashed_list?(style = paragraph_style)
-    return (has_style_type(style) and style.style_type == AppleNote::STYLE_TYPE_DASHED_LIST)
+  def is_dashed_list?
+    return (has_style_type and paragraph_style.style_type == AppleNote::STYLE_TYPE_DASHED_LIST)
   end
 
   ##
   # Helper function to tell if a given AttributeRun is any sort of AppleNote::STYLE_TYPE_X_LIST.
-  def is_any_list?(style = paragraph_style)
-    return (is_numbered_list?(style) or is_dotted_list?(style) or is_dashed_list?(style) or is_checkbox?(style))
+  def is_any_list?
+    return (is_numbered_list? or is_dotted_list? or is_dashed_list? or is_checkbox?)
   end
 
   ##
